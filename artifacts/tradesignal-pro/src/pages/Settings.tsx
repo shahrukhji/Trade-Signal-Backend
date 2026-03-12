@@ -286,19 +286,17 @@ export function Settings() {
                     {/* TOTP */}
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        TOTP (6-digit) <span className="text-destructive">*</span>
+                        TOTP <span className="text-destructive">*</span>
                       </label>
                       <input
                         type="text"
-                        inputMode="numeric"
-                        maxLength={6}
                         value={totp}
-                        onChange={(e) => setTotp(e.target.value.replace(/\D/g, ''))}
-                        placeholder="From authenticator app"
-                        className="w-full bg-input border border-border rounded-xl h-12 px-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors tracking-[0.3em] text-center"
+                        onChange={(e) => setTotp(e.target.value)}
+                        placeholder="From Angel One SmartAPI website"
+                        className="w-full bg-input border border-border rounded-xl h-12 px-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
                       />
-                      <p className="text-[10px] text-muted-foreground mt-1 text-center">
-                        TOTP expires every 30 seconds — enter just before tapping Connect
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Copy the TOTP generated on your Angel One SmartAPI portal
                       </p>
                     </div>
 
