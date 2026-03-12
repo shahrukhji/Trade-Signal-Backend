@@ -1,0 +1,258 @@
+Build a Node.js + Express.js backend for "TradeSignal Pro" algo trading app.
+
+== ANGELONE SMARTAPI CONFIG ==
+BASE_URL = https://apiconnect.angelone.in
+API VERSION: v1 (all routes use v1)
+Required headers on ALL requests:
+{ Authorization: "Bearer {jwtToken}", Content-Type: "application/json",
+  X-UserType: "USER", X-SourceID: "WEB", X-ClientLocalIP: "...",
+  X-ClientPublicIP: "...", X-MACAddress: "00:00:00:00:00:00",
+  X-PrivateKey: "{API_KEY}" }
+
+== AUTH ENDPOINTS ==
+LOGIN: POST /rest/auth/angelbroking/user/v1/loginByPassword
+  Body: { clientcode, password, totp }
+  Returns: { jwtToken, refreshToken, feedToken }
+REFRESH: POST /rest/auth/angelbroking/jwt/v1/generateTokens
+  Body: { refreshToken }
+LOGOUT: POST /rest/secure/angelbroking/user/v1/logout
+TOTP: Generate with otplib → authenticator.generate(TOTP_SECRET)
+Auto-refresh jwtToken 30 mins before expiry using refreshToken.
+
+== USER & FUNDS ==
+GET Profile: GET /rest/secure/angelbroking/user/v1/getProfile
+GET Funds/Margin: GET /rest/secure/angelbroking/user/v1/getRMS
+
+== ORDER ENDPOINTS ==
+Place Order: POST /rest/secure/angelbroking/order/v1/placeOrder
+  Body: { variety:"NORMAL", tradingsymbol, symboltoken, transactiontype:"BUY|SELL",
+  exchange:"NSE|BSE|NFO|MCX", ordertype:"MARKET|LIMIT|STOPLOSS_LIMIT|STOPLOSS_MARKET",
+  producttype:"DELIVERY|CARRYFORWARD|INTRADAY|MARGIN|BO",
+  duration:"DAY|IOC", price, squareoff:"0", stoploss:"0", quantity }
+  Returns: { orderid, uniqueorderid }
+
+Modify: POST /rest/secure/angelbroking/order/v1/modifyOrder
+Cancel: POST /rest/secure/angelbroking/order/v1/cancelOrder  { variety, orderid }
+Order Book: GET /rest/secure/angelbroking/order/v1/getOrderBook
+Trade Book: GET /rest/secure/angelbroking/order/v1/getTradeBook
+Order Status: GET /rest/secure/angelbroking/order/v1/details/{uniqueorderid}
+Convert Position: POST /rest/secure/angelbroking/order/v1/convertPosition
+
+== PORTFOLIO ==
+Holdings: GET /rest/secure/angelbroking/portfolio/v1/getHolding
+Positions: GET /rest/secure/angelbroking/order/v1/getPosition
+
+== MARKET DATA ==
+Live Quote: POST /rest/secure/angelbroking/market/v1/quote/
+  Body: { mode:"LTP|OHLC|FULL", exchangeTokens:{ NSE:["2885","1594"] } }
+  FULL returns: ltp, open, high, low, close, volume, percentchange, 52wHigh,
+  52wLow, upperCircuit, lowerCircuit, bid/ask depth (5 levels)
+  Max 50 symbols per call.
+
+Historical Candles: POST /rest/secure/angelbroking/historical/v1/getCandleData
+  Body: { exchange, symboltoken, interval, fromdate:"YYYY-MM-DD HH:MM", todate }
+  Intervals: ONE_MINUTE | THREE_MINUTE | FIVE_MINUTE | TEN_MINUTE |
+             FIFTEEN_MINUTE | THIRTY_MINUTE | ONE_HOUR | ONE_DAY
+  Response array: [timestamp, open, high, low, close, volume]
+  Transform: { time: unixTimestamp, open, high, low, close, volume }
+  Limits: 1-5min=30days, 15-30min=90days, 1H-1D=365days per request
+
+Symbol Search: POST /rest/secure/angelbroking/order/v1/searchScrip
+  Body: { exchange:"NSE", searchscrip:"RELIANCE" }
+  Returns: tradingsymbol, symboltoken, instrumenttype, name
+
+Gainers/Losers: GET /rest/secure/angelbroking/marketData/v1/gainersLosers
+  ?datatype=PercPriceGainers&expirytype=NEAR
+
+== GTT ORDERS ==
+Create: POST /rest/secure/angelbroking/gtt/v1/createRule
+  Body: { tradingsymbol, symboltoken, exchange, producttype, transactiontype,
+  price, qty, disclosedqty:0, triggerprice, timeperiod:365 }
+Modify: POST /rest/secure/angelbroking/gtt/v1/modifyRule (add "id")
+Cancel: POST /rest/secure/angelbroking/gtt/v1/cancelRule { id, symboltoken, exchange }
+List: POST /rest/secure/angelbroking/gtt/v1/ruleList { status:["NEW","FORALL"], page:1, count:10 }
+Details: GET /rest/secure/angelbroking/gtt/v1/ruleDetails/{id}
+
+== WEBSOCKET LIVE DATA ==
+URL: wss://smartapisocket.angelone.in/smart-stream (authenticate with feedToken)
+Subscribe payload: { action:1, params:{ mode:3, tokenList:[{exchangeType:1, tokens:["2885"]}] }}
+exchangeType: 1=NSE_CM, 2=NSE_FO, 3=BSE_CM, 5=MCX_FO | mode: 1=LTP, 2=Quote, 3=Full
+Heartbeat: send { ping:"ping" } every 30s
+Auto-reconnect with exponential backoff (3s, 6s, 12s...) on disconnect.
+Broadcast ticks to frontend via SSE: GET /api/live/stream
+
+== ERROR HANDLING ==
+AB1010 = JWT expired → auto-call generateTokens
+AB1004 = Invalid API key → notify user
+AB8000 = Rate limit → backoff 60s
+AB1005 = Session not found → re-login
+Rate limits: Orders=5 req/s, Historical=3 req/s, Quote=1 req/s
+Use bottleneck npm for rate limiting: new Bottleneck({ minTime:200 })
+
+== GROWW API (ALTERNATIVE BROKER) ==
+Base: https://api.groww.in
+Auth headers: { Authorization:"Bearer {access_token}" }
+Auth methods:
+  A) API Key+Secret: GrowwAPI.get_access_token(api_key, secret)
+  B) TOTP: otplib.generate(secret) → GrowwAPI.get_access_token(token, totp)
+  C) Direct token paste
+Endpoints:
+  GET  /v1/user/profile
+  GET  /v1/holdings
+  GET  /v1/positions
+  GET  /v1/funds
+  POST /v1/orders/place { trading_symbol, quantity, validity:"DAY", exchange,
+       segment:"CASH|FNO|COMMODITY", product:"CNC|INTRADAY|MARGIN",
+       order_type:"LIMIT|MARKET|SL|SL-M", transaction_type:"BUY|SELL",
+       price, trigger_price, order_reference_id:uuid }
+  DELETE /v1/orders/{orderId}
+  GET  /v1/orders
+  GET  /market/quote/NSE/{symbol}
+
+== BROKER ADAPTER PATTERN ==
+class BrokerAdapter { constructor(broker:"ANGELONE|GROWW")
+  async login(creds), placeOrder(p), getHoldings(), getLTP(s), getCandles(s,i,f,t) }
+Frontend sends header X-Broker: ANGELONE or GROWW. Route automatically.
+
+== INTERNAL EXPRESS ROUTES ==
+POST /api/auth/login          → broker login, return sanitized token status
+GET  /api/auth/status         → { connected, broker, expiry, profile }
+POST /api/market/quote        → { symbols[], exchange } → live quotes
+POST /api/market/candles      → { symbol, exchange, interval, fromdate, todate }
+GET  /api/market/status       → { isOpen, session:"OPEN|PRE|CLOSED", nextEvent }
+GET  /api/market/indices      → NIFTY50, BANKNIFTY, SENSEX, VIX quotes
+POST /api/signals/generate    → fetch candles → indicators → patterns → score → signal
+POST /api/scanner/run         → scan all NIFTY50 in parallel (Promise.all)
+POST /api/indicators/calculate → { candles[], indicators[] } → all values
+POST /api/orders/place        → place via selected broker
+GET  /api/portfolio/holdings
+GET  /api/portfolio/positions
+GET  /api/portfolio/funds
+POST /api/gtt/create
+GET  /api/symbols/search?q=&exchange=
+GET  /api/symbols/nifty50
+GET  /api/live/stream          → SSE live price feed
+
+== TECHNICAL INDICATORS (npm: technicalindicators) ==
+Trend: EMA(closes,period), SMA(closes,period),
+  MACD(closes,12,26,9) → {macdLine, signalLine, histogram, crossover:"BULLISH|BEARISH|null"},
+  Supertrend(candles,10,3) → {signal:"BUY|SELL", value, flip:bool},
+  ParabolicSAR(candles,0.02,0.2), ADX(candles,14) → {adx,plusDI,minusDI},
+  VWAP(candles) → reset daily, Ichimoku(candles)
+
+Momentum: RSI(closes,14) → {value, divergence:"BULL|BEAR|null"},
+  Stochastic(candles,14,3,3) → {k,d,signal},
+  CCI(candles,20), WilliamsR(candles,14), ROC(closes,12), MFI(candles,14)
+
+Volatility: BollingerBands(closes,20,2) → {upper,middle,lower,squeeze:bool},
+  ATR(candles,14), KeltnerChannel(candles,20,1.5), DonchianChannel(candles,20)
+
+Volume: OBV(candles), VolumeAvg(volumes,20), VolumeRatio(current,avg)
+
+Support/Resistance:
+  PivotPoints(prevCandle, type:"STANDARD|FIBONACCI|CAMARILLA")
+    Standard: PP=(H+L+C)/3; R1=2PP-L; S1=2PP-H
+    Fibonacci: R1=PP+0.382*(H-L); R2=PP+0.618*(H-L); R3=PP+(H-L)
+    Camarilla: R1=C+1.1*(H-L)/12; R2=C+1.1*(H-L)/6; R3=C+1.1*(H-L)/4
+  SwingHighsLows(candles, lookback:5)
+
+== SIGNAL SCORING ENGINE ==
+Score each condition, sum total, classify:
+  EMA9>EMA21 +1 | EMA21>EMA50 +1 | EMA50>EMA200 +2 | Price>EMA200 +2
+  EMA9<EMA21 -1 | EMA50<EMA200 -2 | Price<EMA200 -2
+  MACD BullCross +3 | BearCross -3 | Histogram rising +1
+  Supertrend BUY +2 | SELL -2
+  RSI<25 +3 | <30 +2 | <40 +1 | >75 -3 | >70 -2 | >60 -1
+  Bull RSI Divergence +3 | Bear -3
+  Stoch BullCross oversold +2 | BearCross overbought -2
+  Volume 2x+ green +2 | red -2 | 1.5x+ +1
+  Price>VWAP +1 | <VWAP -1 | MFI<20 +2 | >80 -2
+  BB lower touch +2 | upper touch -2 | squeeze → note only
+  At support +2 | breakout above resistance +3 | breakdown below -3
+  Candle patterns: hammer+2, bullEngulf+2, morningStar+3, 3WhiteSoldiers+3
+    shootingStar-2, bearEngulf-2, eveningStar-3, 3BlackCrows-3
+  Chart patterns: doubleBottom+3, cupHandle+3, fallingWedge+2, invH&S+3
+    doubleTop-3, H&S-3, risingWedge-2
+  ADX>25 +DI>-DI +1 | -DI>+DI -1
+
+Classification:
+  ≥12 = STRONG_BUY | 7-11 = BUY | 3-6 = WEAK_BUY
+  -2 to 2 = NEUTRAL | -3 to -6 = WEAK_SELL | -7 to -11 = SELL | ≤-12 = STRONG_SELL
+  confidence = min(95, max(10, 50 + score*3))
+
+Risk Management:
+  SL_buy = min(last20Lows)*0.995 or currentPrice-(ATR*1.5)
+  T1 = entry+(entry-SL)*1.5 | T2 = entry+(entry-SL)*2.5 | T3 = entry+(entry-SL)*3.5
+  If R:R < 1.5 → override to NEUTRAL, push reason "R:R too low"
+
+== PATTERN DETECTION ==
+Candlestick patterns to detect (on last 3-5 candles):
+  Doji, Hammer, InvertedHammer, HangingMan, ShootingStar,
+  BullEngulfing, BearEngulfing, MorningStar, EveningStar,
+  3WhiteSoldiers, 3BlackCrows, PiercingLine, DarkCloud,
+  BullHarami, BearHarami, TweezerBottom, TweezerTop,
+  BullMarubozu, BearMarubozu, SpinningTop, DragonflyDoji, GravestoneDoji
+
+Chart patterns (swing analysis):
+  H&S, InvH&S, DoubleTop, DoubleBottom, AscTriangle, DescTriangle,
+  SymTriangle, BullFlag, BearFlag, RisingWedge, FallingWedge,
+  CupHandle, ChannelUp, ChannelDown, Rectangle
+
+== AI CHART ANALYSIS ==
+POST /api/ai/analyze
+  Body: { provider:"gemini|openai|claude", model, apiKey, stockName,
+  timeframe, candles[], indicators:{}, patterns:{}, levels:{} }
+Routes to:
+  Gemini: POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
+    Body: { contents:[{parts:[{text:prompt}]}], generationConfig:{temperature:0.3, maxOutputTokens:4096} }
+    Response: data.candidates[0].content.parts[0].text
+  OpenAI: POST https://api.openai.com/v1/chat/completions
+  Claude: POST https://api.anthropic.com/v1/messages
+Return standardized: { signal, confidence, entry, target1, target2, target3,
+  stopLoss, riskReward, reasoning[], riskFactors[], summary }
+
+== PAPER TRADING ENGINE ==
+When paper mode ON → intercept all order calls → simulate execution.
+MARKET orders fill at current LTP instantly.
+LIMIT orders fill when LTP crosses limit (poll every 5s).
+SL triggers monitored continuously.
+Virtual balance ₹10,00,000. Track in memory/localStorage per session.
+GET /api/paper/portfolio → simulated portfolio + P&L
+
+== SCANNER ==
+POST /api/scanner/run
+  Promise.all(NIFTY50.map → fetch 15m candles → indicators → signal)
+  Filter confidence > 55%, sort STRONG_BUY first.
+  Emit SSE progress: { scanned:15, total:50, currentStock:"TCS" }
+  Runs on cron "*/5 9-15 * * 1-5" during market hours only.
+
+== MARKET HOURS (IST) ==
+Pre-market: 09:00-09:15 | Open: 09:15-15:30 Mon-Fri | Otherwise: Closed
+
+== NIFTY50 TOKENS (AngelOne) ==
+Store constant with symboltoken for all 50 stocks:
+RELIANCE-EQ:2885, TCS-EQ:11536, HDFCBANK-EQ:1333, INFY-EQ:1594,
+ICICIBANK-EQ:4963, HINDUNILVR-EQ:1394, ITC-EQ:1660, SBIN-EQ:3045,
+BAJFINANCE-EQ:317, BHARTIARTL-EQ:10604, KOTAKBANK-EQ:1922,
+WIPRO-EQ:3787, HCLTECH-EQ:7229, AXISBANK-EQ:5900, ASIANPAINT-EQ:236,
+MARUTI-EQ:10999, SUNPHARMA-EQ:3351, TATASTEEL-EQ:3499,
+ULTRACEMCO-EQ:11532, POWERGRID-EQ:14977, NTPC-EQ:11630,
+NESTLEIND-EQ:17963, TECHM-EQ:13538, TITAN-EQ:3506, TATAMOTORS-EQ:3456,
+JSWSTEEL-EQ:11723, LT-EQ:11483, M&M-EQ:2031, INDUSINDBK-EQ:5258,
+TATACONSUM-EQ:3432 (+ remaining 20 via searchScrip on init)
+
+== ENV VARIABLES ==
+ANGELONE_API_BASE=https://apiconnect.angelone.in
+ANGELONE_API_KEY=your_key
+ANGELONE_CLIENT_CODE=your_code
+ANGELONE_PIN=your_pin
+ANGELONE_TOTP_SECRET=base32_secret
+GROWW_BASE_URL=https://api.groww.in
+PORT=3000 | WEBSOCKET_PORT=3001 | SESSION_SECRET=32chars
+
+== STARTUP ==
+1. Validate all env vars or exit with error
+2. Login to AngelOne → log Connected or Failed
+3. Start Express on PORT + WebSocket on WEBSOCKET_PORT
+4. Start market status cron (every 1 min)
+5. Start auto-scanner cron during market hours
