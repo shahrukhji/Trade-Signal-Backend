@@ -63,11 +63,15 @@ export function Settings() {
   const [clientId, setClientId] = useState('');
   const [password, setPassword] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [totp, setTotp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
+  const [quickConnectLoading, setQuickConnectLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
+  const [configStatus, setConfigStatus] = useState<{
+    allConfigured: boolean; hasTotpSecret: boolean;
+    hasClientCode: boolean; hasApiKey: boolean;
+  } | null>(null);
 
   // Post-login data
   const [wallet, setWallet] = useState<WalletBalance | null>(null);
@@ -82,12 +86,17 @@ export function Settings() {
 
   const isConnected = !!brokerSession && !brokerIsDemo;
 
-  // Restore session on mount
+  // Restore session on mount + check pre-configured secrets
   useEffect(() => {
     if (brokerSession && brokerApiKey) {
       angelOne.restoreSession(brokerSession, brokerIsDemo, brokerApiKey);
     }
     if (brokerProfile) setClientId(brokerProfile.clientId);
+    // Check which secrets are already configured on the server
+    fetch('/api/broker-proxy/config-status')
+      .then((r) => r.json())
+      .then(setConfigStatus)
+      .catch(() => {});
   }, []);
 
   // Refresh market status every 30s
@@ -111,28 +120,72 @@ export function Settings() {
     if (isConnected) fetchWallet();
   }, [isConnected]);
 
+  // Quick Connect — uses env-configured credentials (TOTP auto-generated server-side)
+  const handleQuickConnect = async () => {
+    setQuickConnectLoading(true);
+    setLoginError('');
+    try {
+      const res = await fetch('/api/broker-proxy/auto-login', { method: 'POST' });
+      const data = await res.json();
+      if (data.status && data.data) {
+        const session = {
+          jwtToken: data.data.jwtToken,
+          refreshToken: data.data.refreshToken,
+          feedToken: data.data.feedToken,
+          clientId: data.data._clientCode || data.data.clientcode || '',
+          clientName: data.data.name || 'Trader',
+          email: data.data.email || '',
+          phone: data.data.mobileno || '',
+          exchanges: data.data.exchanges || ['NSE', 'BSE'],
+          products: data.data.products || ['DELIVERY', 'INTRADAY'],
+          lastLoginTime: data.data.lastlogintime || new Date().toISOString(),
+          broker: 'Angel One',
+        };
+        const savedApiKey = data.data._apiKey || '';
+        await angelOne.restoreSession(session, false, savedApiKey);
+        const profile = {
+          clientId: session.clientId,
+          clientName: session.clientName,
+          email: session.email,
+          phone: session.phone,
+          pan: data.data.pan || 'XXXXX0000X',
+          dematId: data.data.dematId || '',
+          broker: 'Angel One',
+          exchanges: session.exchanges,
+          products: session.products,
+          lastLoginTime: session.lastLoginTime,
+          avatarInitials: session.clientName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2),
+        };
+        setBrokerSession(session, profile, false, savedApiKey);
+        toast.success(`Connected as ${session.clientName}`);
+        setTimeout(async () => { const bal = await angelOne.getWalletBalance(); setWallet(bal); }, 800);
+      } else {
+        setLoginError(data.message || 'Quick Connect failed. Check your Replit secrets.');
+      }
+    } catch (err: any) {
+      setLoginError('Quick Connect error: ' + (err?.message || 'Unknown'));
+    }
+    setQuickConnectLoading(false);
+  };
+
   const handleConnect = async () => {
     if (!clientId.trim()) { setLoginError('Client ID is required'); return; }
     if (!password.trim()) { setLoginError('Password / PIN is required'); return; }
     if (!apiKey.trim()) { setLoginError('SmartAPI Key is required'); return; }
-    if (!totp.trim()) { setLoginError('TOTP is required'); return; }
-    if (totp.trim().length < 6 || totp.trim().length > 64) {
-      setLoginError('TOTP must be between 6 and 64 characters');
-      return;
-    }
 
     setLoginLoading(true);
     setLoginError('');
 
+    // TOTP is auto-injected server-side from ANGELONE_TOTP_SECRET if configured;
+    // pass empty string so the proxy injects it from env var.
     const result = await angelOne.login(
-      { clientId: clientId.trim().toUpperCase(), password: password.trim(), apiKey: apiKey.trim(), totp: totp.trim() },
+      { clientId: clientId.trim().toUpperCase(), password: password.trim(), apiKey: apiKey.trim(), totp: '' },
       { strict: true }
     );
 
     if (result.success && result.session && result.profile) {
       setBrokerSession(result.session, result.profile, false, apiKey.trim());
       toast.success(`Connected as ${result.profile.clientName}`);
-      setTotp('');
       // Fetch wallet after connecting
       setTimeout(async () => {
         const bal = await angelOne.getWalletBalance();
@@ -393,6 +446,31 @@ export function Settings() {
                     <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Connect Angel One SmartAPI</h2>
                   </div>
 
+                  {/* Quick Connect — only show if all secrets are pre-configured */}
+                  {configStatus?.allConfigured && (
+                    <div className="mb-3">
+                      <button
+                        onClick={handleQuickConnect}
+                        disabled={quickConnectLoading}
+                        className="w-full h-13 py-3.5 bg-gradient-to-r from-primary to-accent text-background font-black rounded-xl shadow-[0_0_28px_rgba(0,191,255,0.5)] flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-60"
+                      >
+                        {quickConnectLoading ? (
+                          <><Loader2 size={16} className="animate-spin" /> Connecting...</>
+                        ) : (
+                          <><Wifi size={16} /> Quick Connect (Auto)</>
+                        )}
+                      </button>
+                      <p className="text-[10px] text-center text-primary/70 mt-1.5 flex items-center justify-center gap-1">
+                        <CheckCircle2 size={9} /> All credentials pre-configured · TOTP auto-generated
+                      </p>
+                      <div className="flex items-center gap-2 my-3">
+                        <div className="flex-1 h-px bg-border" />
+                        <span className="text-[10px] text-muted-foreground uppercase">or enter manually</span>
+                        <div className="flex-1 h-px bg-border" />
+                      </div>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     {/* Client ID */}
                     <div>
@@ -463,31 +541,19 @@ export function Settings() {
                       </p>
                     </div>
 
-                    {/* TOTP */}
-                    <div>
-                      <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        TOTP <span className="text-muted-foreground font-normal">(6–64 characters)</span> <span className="text-destructive">*</span>
-                      </label>
-                      <div className="relative">
-                        <CheckCircle2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                          type="text"
-                          value={totp}
-                          onChange={(e) => { setTotp(e.target.value); setLoginError(''); }}
-                          placeholder="Paste TOTP from Angel One SmartAPI portal"
-                          maxLength={64}
-                          className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
-                          autoComplete="one-time-code"
-                        />
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        Copy the time-based token from your Angel One SmartAPI portal
-                      </p>
-                      {totp.length > 0 && (
-                        <p className={`text-[10px] mt-0.5 ${totp.length >= 6 && totp.length <= 64 ? 'text-primary' : 'text-destructive'}`}>
-                          {totp.length} characters {totp.length < 6 ? '(need at least 6)' : totp.length > 64 ? '(max 64)' : '✓'}
+                    {/* TOTP info — auto-generated server-side */}
+                    <div className="flex items-center gap-2 bg-primary/5 border border-primary/15 rounded-xl px-3 py-2.5">
+                      <CheckCircle2 size={13} className={configStatus?.hasTotpSecret ? 'text-primary' : 'text-muted-foreground'} />
+                      <div>
+                        <p className="text-[11px] font-semibold text-foreground">
+                          TOTP {configStatus?.hasTotpSecret ? 'Auto-Generated ✓' : 'Required'}
                         </p>
-                      )}
+                        <p className="text-[9px] text-muted-foreground leading-tight">
+                          {configStatus?.hasTotpSecret
+                            ? 'ANGELONE_TOTP_SECRET is configured — code generated automatically'
+                            : 'Set ANGELONE_TOTP_SECRET in Replit Secrets for auto-generation'}
+                        </p>
+                      </div>
                     </div>
 
                     {/* Error */}

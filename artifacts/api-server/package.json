@@ -18,6 +18,7 @@
     "drizzle-orm": "catalog:",
     "express": "^5",
     "node-cron": "^4.2.1",
+    "otplib": "^13.3.0",
     "speakeasy": "^2.0.0",
     "technicalindicators": "^3.1.0",
     "uuid": "^13.0.0",
