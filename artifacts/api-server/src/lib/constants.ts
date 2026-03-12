@@ -1,0 +1,75 @@
+export const ANGELONE_BASE_URL = "https://apiconnect.angelone.in";
+export const GROWW_BASE_URL = "https://api.groww.in";
+
+export const NIFTY50 = [
+  { symbol: "RELIANCE-EQ", token: "2885", name: "Reliance Industries" },
+  { symbol: "TCS-EQ", token: "11536", name: "Tata Consultancy Services" },
+  { symbol: "HDFCBANK-EQ", token: "1333", name: "HDFC Bank" },
+  { symbol: "INFY-EQ", token: "1594", name: "Infosys" },
+  { symbol: "ICICIBANK-EQ", token: "4963", name: "ICICI Bank" },
+  { symbol: "HINDUNILVR-EQ", token: "1394", name: "Hindustan Unilever" },
+  { symbol: "ITC-EQ", token: "1660", name: "ITC" },
+  { symbol: "SBIN-EQ", token: "3045", name: "State Bank of India" },
+  { symbol: "BAJFINANCE-EQ", token: "317", name: "Bajaj Finance" },
+  { symbol: "BHARTIARTL-EQ", token: "10604", name: "Bharti Airtel" },
+  { symbol: "KOTAKBANK-EQ", token: "1922", name: "Kotak Mahindra Bank" },
+  { symbol: "WIPRO-EQ", token: "3787", name: "Wipro" },
+  { symbol: "HCLTECH-EQ", token: "7229", name: "HCL Technologies" },
+  { symbol: "AXISBANK-EQ", token: "5900", name: "Axis Bank" },
+  { symbol: "ASIANPAINT-EQ", token: "236", name: "Asian Paints" },
+  { symbol: "MARUTI-EQ", token: "10999", name: "Maruti Suzuki" },
+  { symbol: "SUNPHARMA-EQ", token: "3351", name: "Sun Pharmaceutical" },
+  { symbol: "TATASTEEL-EQ", token: "3499", name: "Tata Steel" },
+  { symbol: "ULTRACEMCO-EQ", token: "11532", name: "UltraTech Cement" },
+  { symbol: "POWERGRID-EQ", token: "14977", name: "Power Grid Corporation" },
+  { symbol: "NTPC-EQ", token: "11630", name: "NTPC" },
+  { symbol: "NESTLEIND-EQ", token: "17963", name: "Nestle India" },
+  { symbol: "TECHM-EQ", token: "13538", name: "Tech Mahindra" },
+  { symbol: "TITAN-EQ", token: "3506", name: "Titan Company" },
+  { symbol: "TATAMOTORS-EQ", token: "3456", name: "Tata Motors" },
+  { symbol: "JSWSTEEL-EQ", token: "11723", name: "JSW Steel" },
+  { symbol: "LT-EQ", token: "11483", name: "Larsen & Toubro" },
+  { symbol: "M&M-EQ", token: "2031", name: "Mahindra & Mahindra" },
+  { symbol: "INDUSINDBK-EQ", token: "5258", name: "IndusInd Bank" },
+  { symbol: "TATACONSUM-EQ", token: "3432", name: "Tata Consumer Products" },
+  { symbol: "ONGC-EQ", token: "2475", name: "ONGC" },
+  { symbol: "COALINDIA-EQ", token: "1660", name: "Coal India" },
+  { symbol: "ADANIPORTS-EQ", token: "15083", name: "Adani Ports" },
+  { symbol: "ADANIENT-EQ", token: "25", name: "Adani Enterprises" },
+  { symbol: "BAJAJFINSV-EQ", token: "16675", name: "Bajaj Finserv" },
+  { symbol: "BAJAJ-AUTO-EQ", token: "16669", name: "Bajaj Auto" },
+  { symbol: "HEROMOTOCO-EQ", token: "1348", name: "Hero MotoCorp" },
+  { symbol: "CIPLA-EQ", token: "694", name: "Cipla" },
+  { symbol: "DIVISLAB-EQ", token: "10940", name: "Divi's Laboratories" },
+  { symbol: "DRREDDY-EQ", token: "881", name: "Dr. Reddy's Laboratories" },
+  { symbol: "EICHERMOT-EQ", token: "910", name: "Eicher Motors" },
+  { symbol: "GRASIM-EQ", token: "1232", name: "Grasim Industries" },
+  { symbol: "HDFCLIFE-EQ", token: "467", name: "HDFC Life Insurance" },
+  { symbol: "SBILIFE-EQ", token: "21808", name: "SBI Life Insurance" },
+  { symbol: "BPCL-EQ", token: "526", name: "BPCL" },
+  { symbol: "BRITANNIA-EQ", token: "547", name: "Britannia Industries" },
+  { symbol: "APOLLOHOSP-EQ", token: "157", name: "Apollo Hospitals" },
+  { symbol: "TRENT-EQ", token: "3721", name: "Trent" },
+  { symbol: "SHRIRAMFIN-EQ", token: "4306", name: "Shriram Finance" },
+  { symbol: "HINDALCO-EQ", token: "1363", name: "Hindalco Industries" },
+];
+
+export const MARKET_INDICES = [
+  { symbol: "Nifty 50", token: "99926000", exchange: "NSE" },
+  { symbol: "Nifty Bank", token: "99926009", exchange: "NSE" },
+  { symbol: "SENSEX", token: "1", exchange: "BSE" },
+  { symbol: "India VIX", token: "99919000", exchange: "NSE" },
+];
+
+export const RATE_LIMITS = {
+  orders: { minTime: 200 },
+  historical: { minTime: 334 },
+  quote: { minTime: 1000 },
+};
+
+export const ANGELONE_ERRORS: Record<string, string> = {
+  AB1010: "JWT expired",
+  AB1004: "Invalid API key",
+  AB8000: "Rate limit exceeded",
+  AB1005: "Session not found",
+};
