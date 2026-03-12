@@ -41,7 +41,9 @@ A full-stack algorithmic trading signal app for Indian markets (NSE/BSE), optimi
 4. `/signals` — Signal cards with confidence, entry/target/SL
 5. `/portfolio` — Holdings, open orders, trade history
 6. `/settings` — Broker connection, AI config, trading preferences
-7. `/scanner` — NIFTY50 scanner overlay (SSE progress)
+7. `/scanner` — Smart Scanner: scan 50 stocks with 10 filters (Oversold, Volume Spike, Breakout, etc.)
+8. `/strategies` — Strategy Lab: AI market condition detector + 10 strategies with confluence scoring
+9. `/account` — Angel One broker login + holdings/positions/orders tabs (post-login)
 
 **Key Features:**
 - Paper Trading Mode (red banner on every screen)
@@ -49,6 +51,26 @@ A full-stack algorithmic trading signal app for Indian markets (NSE/BSE), optimi
 - Real engine OHLCV generation (250 candles per symbol, live ±tick every 3s)
 - Watermark: "Made with ❤️ by Shahrukh" on every screen
 - localStorage: broker_auth, gemini_config, trading_prefs, watchlist, paper_portfolio, signal_history
+
+### New Engine Files (strategies, risk, screener)
+
+**strategies.ts** — 10 trading strategies (each returns StrategySignal with entry/SL/TP/RR):
+Trend Following, RSI Oversold Bounce, MACD Crossover, Bollinger Mean Reversion, Volume Breakout, Supertrend Momentum, ADX Trend Filter, VWAP Bounce, EMA Pullback, Range Bound Trader
+- `detectMarketCondition(candles)` — returns STRONG_UPTREND…STRONG_DOWNTREND with confidence
+- `recommendBestStrategies(candles)` — ranks strategies for current market conditions
+- All strategies return `StrategySignal { action, entry, stopLoss, target, rr, confidence, reason }`
+
+**riskManager.ts** — RiskManager class:
+- `calculatePositionSize()` — Kelly Criterion + 1% rule (whichever is smaller)
+- `validateTrade()` — checks daily loss limit, max position count, trade size limits
+- `calculateRisk()` — detailed risk/reward metrics
+- `createTradeAlert()` — real-time monitoring alert
+- Configurable risk params: maxPositionSizePct, maxDailyLossPct, maxPositions
+
+**screener.ts** — StockScreener class:
+- 10 built-in filters: BUY signals, oversold, volume spike, breakout, Supertrend, MACD, EMA cross, Bollinger squeeze, ADX strong trend, near support
+- `screenStocks(stocks, filterKey)` — returns ScreenerResult[] with all signal details
+- `getPopularStocksForFilter(filterKey)` — returns top matching stocks
 
 ### Core Analysis Engine — `artifacts/tradesignal-pro/src/engine/`
 

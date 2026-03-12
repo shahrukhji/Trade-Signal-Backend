@@ -10,7 +10,9 @@ import { ChartScreen } from "@/pages/ChartScreen";
 import { Signals } from "@/pages/Signals";
 import { Portfolio } from "@/pages/Portfolio";
 import { Settings } from "@/pages/Settings";
-import { ScannerOverlay } from "@/pages/ScannerOverlay";
+import { StrategyScreen } from "@/pages/StrategyScreen";
+import { ScannerScreen } from "@/pages/ScannerScreen";
+import { AccountScreen } from "@/pages/AccountScreen";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -30,9 +32,11 @@ function Router() {
         <Route path="/home" component={Home} />
         <Route path="/charts" component={ChartScreen} />
         <Route path="/signals" component={Signals} />
+        <Route path="/strategies" component={StrategyScreen} />
+        <Route path="/scanner" component={ScannerScreen} />
         <Route path="/portfolio" component={Portfolio} />
+        <Route path="/account" component={AccountScreen} />
         <Route path="/settings" component={Settings} />
-        <Route path="/scanner" component={ScannerOverlay} />
         <Route component={NotFound} />
       </Switch>
     </Layout>

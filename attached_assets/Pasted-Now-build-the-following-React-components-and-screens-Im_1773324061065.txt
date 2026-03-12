@@ -1,0 +1,561 @@
+Now build the following React components and screens. Import from the angelOneService and from the engine files (indicators.ts, patterns.ts, signalEngine.ts) that were already created.
+
+═══════════════════════════════════════════════════════════════
+FILE 2: src/renderer/components/StockSearch.tsx
+COMPLETE STOCK SEARCH WITH AUTOCOMPLETE
+═══════════════════════════════════════════════════════════════
+
+Build a React component called StockSearch with these features:
+
+Props: onSelectStock(stock: StockSearchResult): void, placeholder?: string, className?: string
+Full-width search input with 🔍 icon left and ✕ clear button right
+Height 48px, dark background #1A1A2E, border #2A2A3E, focus border #00BFFF
+Debounced search (250ms) — calls angelOneService.searchStocks(query)
+Dropdown appears below input (absolute positioned, z-index 1000, max-height 400px, scrollable)
+Each result row (height 56px, hover background #222238):
+Left: Circle with first letter of company (colored by sector)
+Center: Company name (bold 14px white), Trading symbol (12px gray), Sector badge (tiny pill)
+Right: Exchange badge "NSE" (blue pill)
+Click result: calls onSelectStock, closes dropdown, sets input to symbol name
+Empty state: When no query, show "Popular Stocks" section with 8 chip buttons: RELIANCE, TCS, INFY, HDFCBANK, SBIN, ITC, WIPRO, TATAMOTORS — clicking any chip calls onSelectStock
+No results state: "No stocks found for '{query}'"
+Recently searched: Store last 5 searched symbols in localStorage, show as chips below search when focused
+Keyboard: Arrow Up/Down to navigate results, Enter to select highlighted, Escape to close
+Click outside dropdown closes it (use useEffect with document click listener)
+Fuzzy matching: searching "reli" should find RELIANCE, "tata mot" should find TATAMOTORS
+═══════════════════════════════════════════════════════════════
+FILE 3: src/renderer/components/AccountDashboard.tsx
+ACCOUNT HOLDER + WALLET + LIVE CONNECTION STATUS
+═══════════════════════════════════════════════════════════════
+
+Build a React component called AccountDashboard that displays:
+
+Section 1: Profile Card
+Large avatar circle (64px, gradient background #00BFFF → #A855F7) with initials
+Name: "{clientName}" in bold 22px white
+Client ID: "{clientId}" in 14px gray with copy button
+Broker: "Angel One" with green status dot if connected
+Email: masked (sha***@gmail.com)
+Phone: masked (98****3210)
+Last login time formatted
+Exchange badges: "NSE ✓" "BSE ✓" "MCX ✓" as green pills
+Product badges: "DELIVERY" "INTRADAY" "MARGIN" as blue pills
+Section 2: Wallet Balance Card (gradient border gold)
+Large prominent card:
+
+"💰 Available Cash" label, then "₹2,47,850.50" in HUGE 32px green bold
+2-column grid below:
+| Total Portfolio Value | ₹6,52,840.75 |
+| Total Invested | ₹4,05,000.00 |
+| Available Margin | ₹2,47,850.50 |
+| Used Margin | ₹1,52,340.00 |
+| Collateral | ₹85,000.00 |
+| Withdrawable | ₹1,47,850.50 |
+Each row has label (gray 13px) and value (white 15px bold, formatted ₹)
+Today's P&L row: "+₹3,420.50 (+0.52%)" in green if positive, red if negative
+Unrealized P&L: "+₹12,580.75" colored
+Auto-refresh balance every 60 seconds
+"🔄 Refresh" button that manually fetches latest balance
+Section 3: Live Connection Monitor Card
+Title: "📡 Connection Status"
+Status indicator: Large colored dot + text
+🟢 "Connected" (green) — show latency "45ms"
+🟡 "Demo Mode" (yellow) — show "Using simulated data"
+🔴 "Disconnected" (red) — show "Cannot reach Angel One"
+🟠 "Session Expiring" (orange) — show countdown
+API Latency: "45ms 🟢" with color (green <100ms, yellow 100-500ms, red >500ms)
+Session expires in: "5h 42m" countdown (updates every second)
+Requests used: "42/100" with small progress bar
+Last health check: "30 seconds ago"
+Data sync: "Live 🟢" or "Stale ⚠️"
+Buttons: "🔄 Check Now" | "🔌 Disconnect" | "🔑 Re-login"
+Section 4: Quick Stats Row (4 cards)
+Holdings: "{count} stocks"
+Open Positions: "{count} active"
+Open Orders: "{count} pending"
+Today's Trades: "{count} executed"
+All data fetched from angelOneService on component mount. Uses useEffect with polling for live updates. Format all ₹ values with Indian comma notation.
+
+═══════════════════════════════════════════════════════════════
+FILE 4: src/engine/strategies.ts
+10 PROFESSIONAL TRADING STRATEGIES
+═══════════════════════════════════════════════════════════════
+
+Build complete file with these types and all 10 strategies fully implemented. Each strategy has a working execute() function that takes OHLCV candles and returns a complete signal.
+
+IMPORTANT: Import SMA, EMA, RSI, MACD, BollingerBands, Stochastic, ATR, Supertrend, ADX, VWAP, CCI, MFI, findSupportResistance, analyzeVolume, findSwingLow, findSwingHigh from the existing indicators.ts file. Import detectAllCandlePatterns from patterns.ts.
+
+Types needed:
+
+TypeScript
+
+export type MarketCondition = 'STRONG_UPTREND' | 'UPTREND' | 'SIDEWAYS' | 'DOWNTREND' | 'STRONG_DOWNTREND' | 'VOLATILE' | 'LOW_VOLATILITY';
+
+export interface StrategySignal {
+  action: 'BUY' | 'SELL' | 'HOLD' | 'EXIT_LONG' | 'EXIT_SHORT';
+  entry: number;
+  stopLoss: number;
+  target1: number;
+  target2: number;
+  target3: number;
+  trailingStop?: number;
+  confidence: number;
+  riskReward: number;
+  reasoning: string[];
+  triggered: boolean;
+}
+
+export interface Strategy {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  type: 'trend_following' | 'mean_reversion' | 'momentum' | 'breakout' | 'scalping';
+  timeframes: string[];
+  bestMarketConditions: MarketCondition[];
+  worstMarketConditions: MarketCondition[];
+  riskLevel: 'low' | 'medium' | 'high';
+  expectedWinRate: number;
+  avgProfit: number;
+  avgLoss: number;
+  holdingPeriod: string;
+  rules: { entry: string[]; exit: string[]; stopLoss: string[]; management: string[] };
+  execute: (candles: OHLCV[]) => StrategySignal;
+}
+
+export interface StrategyRecommendation {
+  strategy: Strategy;
+  signal: StrategySignal;
+  suitabilityScore: number;
+  reason: string;
+}
+Implement these 10 strategies each with a COMPLETE execute() function:
+
+Strategy 1: EMA Crossover Momentum (📈)
+
+Buy when EMA9 crosses above EMA21, sell on opposite
+Confirm with price above EMA50, volume above average
+Stop at EMA50, trail with EMA21
+Win rate: 55%, best in trending markets
+Strategy 2: RSI Oversold Bounce (🎯)
+
+Buy when RSI < 30 and starts turning up
+Confirm with bullish candle pattern near support
+Target: RSI return to 50-60
+Win rate: 62%, works in all markets except strong downtrend
+Strategy 3: MACD Divergence Reversal (🔄)
+
+Detect bullish/bearish divergence between price and MACD
+Buy on bullish divergence + MACD crossover
+Strong reversal signal, avg profit 4.2%
+Win rate: 58%
+Strategy 4: Supertrend Trend Rider (🚀)
+
+Buy when Supertrend flips green, sell when red
+Supertrend value itself acts as trailing stop
+Simple but effective, avg profit 5.0%
+Win rate: 52% but big winners
+Strategy 5: Bollinger Mean Reversion (🌊)
+
+Buy at lower BB with RSI<40, sell at upper BB
+Target middle band, extended target opposite band
+Works great in sideways/volatile markets
+Win rate: 65%, avg profit 2.0%
+Strategy 6: Bollinger Squeeze Breakout (💥)
+
+Detect BB squeeze (bandwidth at 20-period low)
+Buy on breakout above upper BB with volume spike
+Explosive moves after compression
+Win rate: 55%, avg profit 5.5%
+Strategy 7: VWAP Bounce Intraday (📊)
+
+Buy when price pulls back to VWAP and bounces
+Intraday only, institutional benchmark
+Quick scalp with tight stops
+Win rate: 60%, avg profit 1.5%
+Strategy 8: Trend Pullback Entry (⬇️⬆️)
+
+In confirmed uptrend (EMA20>50>200), buy dips to EMA20/50
+Classic "buy the dip" strategy
+Trail with EMA20, tight stops
+Win rate: 63%, avg profit 3.0%
+Strategy 9: Support/Resistance Breakout (🔥)
+
+Buy breakout above resistance with 1.5x volume
+Sell breakdown below support
+Wide targets for explosive moves
+Win rate: 50%, avg profit 6.0%
+Strategy 10: Range Bound Trader (↔️)
+
+When ADX<25 (ranging), buy at support, sell at resistance
+Works 60-70% of the time since markets range most of the time
+Win rate: 65%, avg profit 2.0%
+Each execute() function must:
+
+Calculate required indicators from the candles array
+Check entry conditions
+If triggered: return action, entry price, stop loss, 3 targets, confidence, R:R ratio, detailed reasoning strings
+If not triggered: return action='HOLD' with reasoning explaining what we're waiting for
+Include specific price values and indicator readings in reasoning strings
+Also implement:
+
+detectMarketCondition(candles: OHLCV[])
+
+Returns current market condition (UPTREND, DOWNTREND, SIDEWAYS, etc.)
+Based on ADX, EMA alignment, BB bandwidth
+Includes description and list of best strategies for this condition
+recommendBestStrategies(candles: OHLCV[]): StrategyRecommendation[]
+
+Runs all 10 strategies on the candles
+Scores each by suitability for current market condition
+Returns sorted array: triggered strategies first, then by suitability score
+Each recommendation includes the strategy, its signal, suitability score (0-100), and reason string
+getAllStrategies(): Strategy[]
+
+Returns all 10 strategy objects
+═══════════════════════════════════════════════════════════════
+FILE 5: src/renderer/screens/StrategyScreen.tsx
+COMPLETE STRATEGY SCREEN
+═══════════════════════════════════════════════════════════════
+
+Build a complete React screen component with:
+
+Top Section: Market Condition Analysis
+Card with colored border based on condition:
+UPTREND: green border + "📈 UPTREND" badge
+DOWNTREND: red border + "📉 DOWNTREND" badge
+SIDEWAYS: yellow border + "↔️ SIDEWAYS" badge
+VOLATILE: orange border + "🌊 VOLATILE" badge
+LOW_VOLATILITY: blue border + "💤 LOW VOLATILITY" badge
+Description text from detectMarketCondition()
+ADX value, Trend direction, Volatility level
+"Best strategies:" row of strategy name chips with emojis
+Stock selector dropdown to change which stock is analyzed
+Auto-refreshes every 30 seconds
+AI Recommendation Card (Gold border, premium feel)
+Title: "🤖 AI Strategy Recommendation"
+Runs recommendBestStrategies() on current stock
+Shows TOP 3 recommendations as numbered cards:
+🥇 Best Strategy: Name + emoji, Suitability score ring, Current signal, Why recommended
+🥈 Second Best: Same format
+🥉 Third Best: Same format
+If any strategy has triggered signal, show BUY/SELL badge prominently
+"Apply Best Strategy" button — opens trade execution
+Strategy Grid (2 columns on desktop, scrollable)
+All 10 strategies as cards:
+Each card (border-radius 14px, dark bg):
+
+Header: Emoji + Strategy name + Type badge (Trend Following / Mean Reversion / etc.)
+Risk indicator: 🟢 Low / 🟡 Medium / 🔴 High
+Stats row: "Win: 62%" | "Avg +2.8%" | "Avg -1.2%"
+Timeframes: chips showing "15m", "1h", "4h", "1d"
+Market match: Colored bar 0-100% showing suitability for current condition
+If best condition: Green "85% Match — Ideal for current market"
+If worst condition: Red "15% Match — Not recommended now"
+Current signal status: "🟢 BUY Active" or "⚪ No Signal" or "🔴 SELL Active"
+If signal is active, show mini trade setup: "Entry ₹2,450 | SL ₹2,410 | T1 ₹2,500"
+"📋 View Rules" button — expands to show entry/exit/SL/management rules
+"▶️ Apply Strategy" button — executes strategy on current stock and shows result
+Strategy Detail Modal (on card click or Apply)
+Full strategy description
+4 sections: Entry Rules, Exit Rules, Stop Loss Rules, Trade Management Rules
+Each rule as a numbered list with explanation
+Current signal result:
+If BUY: Green card with entry, targets, SL, R:R, confidence ring, all reasoning points
+If SELL: Red card
+If HOLD: Gray card explaining what we're waiting for
+"Execute Trade" button → Opens order placement
+Watermark at bottom: "Made with ❤️ by Shahrukh"
+═══════════════════════════════════════════════════════════════
+FILE 6: src/engine/riskManager.ts
+ADVANCED RISK MANAGEMENT
+═══════════════════════════════════════════════════════════════
+
+TypeScript
+
+// Risk Manager — Ensures we never blow up the account
+// Made with ❤️ by Shahrukh
+
+export interface RiskAssessment {
+  maxPositionSize: number;
+  maxCapitalForTrade: number;
+  riskAmount: number;
+  riskPercent: number;
+  kellyCriterionSize: number;
+  riskRating: 'SAFE' | 'MODERATE' | 'RISKY' | 'DANGEROUS';
+  warnings: string[];
+  approved: boolean;
+}
+
+export function assessTradeRisk(
+  totalCapital: number,
+  entryPrice: number,
+  stopLoss: number,
+  quantity: number,
+  maxRiskPercent: number = 2,
+  currentExposure: number = 0,
+  winRate: number = 55,
+  avgWinPercent: number = 3,
+  avgLossPercent: number = 1.5
+): RiskAssessment {
+  const riskPerShare = Math.abs(entryPrice - stopLoss);
+  const totalRisk = riskPerShare * quantity;
+  const tradeValue = entryPrice * quantity;
+  const riskPercent = (totalRisk / totalCapital) * 100;
+  
+  // Kelly Criterion
+  const p = winRate / 100;
+  const b = avgWinPercent / avgLossPercent;
+  const kelly = Math.max(0, ((p * b - (1 - p)) / b));
+  const kellyShares = riskPerShare > 0 ? Math.floor((totalCapital * kelly) / entryPrice) : 0;
+  
+  const maxRiskAmount = totalCapital * (maxRiskPercent / 100);
+  const maxShares = riskPerShare > 0 ? Math.floor(maxRiskAmount / riskPerShare) : 0;
+  
+  const totalExposure = currentExposure + tradeValue;
+  const exposurePercent = (totalExposure / totalCapital) * 100;
+  
+  const warnings: string[] = [];
+  let riskRating: RiskAssessment['riskRating'] = 'SAFE';
+  let approved = true;
+  
+  if (riskPercent > maxRiskPercent * 2) {
+    riskRating = 'DANGEROUS';
+    warnings.push(`⛔ Risk ${riskPercent.toFixed(1)}% is MORE THAN DOUBLE your max ${maxRiskPercent}%! Reduce to ${maxShares} shares.`);
+    approved = false;
+  } else if (riskPercent > maxRiskPercent) {
+    riskRating = 'RISKY';
+    warnings.push(`⚠️ Risk ${riskPercent.toFixed(1)}% exceeds your ${maxRiskPercent}% limit. Recommended max: ${maxShares} shares.`);
+  } else if (riskPercent > maxRiskPercent * 0.7) {
+    riskRating = 'MODERATE';
+    warnings.push(`📊 Risk ${riskPercent.toFixed(1)}% is approaching your ${maxRiskPercent}% limit.`);
+  }
+  
+  if (exposurePercent > 80) {
+    warnings.push(`⚠️ Total portfolio exposure will be ${exposurePercent.toFixed(0)}% — Very concentrated!`);
+    if (exposurePercent > 95) { approved = false; warnings.push('⛔ Portfolio over-exposed. Reduce positions before adding new ones.'); }
+  }
+  
+  if (quantity > kellyShares * 1.5 && kellyShares > 0) {
+    warnings.push(`📐 Kelly Criterion suggests max ${kellyShares} shares for optimal position sizing.`);
+  }
+  
+  if (riskPerShare / entryPrice > 0.05) {
+    warnings.push(`⚠️ Stop loss ${((riskPerShare / entryPrice) * 100).toFixed(1)}% away from entry — Very wide. Consider tighter stop.`);
+  }
+  
+  if (warnings.length === 0) {
+    warnings.push(`✅ Trade risk is SAFE at ${riskPercent.toFixed(2)}% of capital. Position size approved.`);
+  }
+  
+  return {
+    maxPositionSize: maxShares,
+    maxCapitalForTrade: maxRiskAmount / (riskPerShare / entryPrice || 1),
+    riskAmount: Math.round(totalRisk * 100) / 100,
+    riskPercent: Math.round(riskPercent * 100) / 100,
+    kellyCriterionSize: kellyShares,
+    riskRating,
+    warnings,
+    approved,
+  };
+}
+═══════════════════════════════════════════════════════════════
+FILE 7: src/engine/screener.ts
+SMART STOCK SCREENER
+═══════════════════════════════════════════════════════════════
+
+TypeScript
+
+// Smart Screener — Finds money-making opportunities
+// Made with ❤️ by Shahrukh
+
+import { LiveSignal } from './signalEngine';
+
+export interface ScreenerFilter {
+  id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  category: 'momentum' | 'reversal' | 'volume' | 'pattern' | 'strength';
+  filter: (signal: LiveSignal) => boolean;
+}
+
+export const SCREENER_FILTERS: ScreenerFilter[] = [
+  {
+    id: 'oversold_bounce', name: 'Oversold Bounce Ready', emoji: '🎯', category: 'reversal',
+    description: 'RSI < 30 with bullish reversal candle pattern — High probability bounce',
+    filter: (s) => s.indicators.rsi < 30 && s.candlePatterns.some(p => p.type === 'bullish'),
+  },
+  {
+    id: 'volume_spike', name: 'Volume Spike Stocks', emoji: '📊', category: 'volume',
+    description: '2x+ average volume — Institutional activity detected',
+    filter: (s) => s.indicators.volume.ratio >= 2,
+  },
+  {
+    id: 'macd_cross', name: 'MACD Bullish Crossover', emoji: '📈', category: 'momentum',
+    description: 'MACD just crossed above signal — Momentum turning bullish',
+    filter: (s) => s.indicators.macd.crossover === 'BULLISH_CROSSOVER',
+  },
+  {
+    id: 'supertrend_buy', name: 'Supertrend Buy Signal', emoji: '🚀', category: 'momentum',
+    description: 'Supertrend just flipped to BUY — New uptrend starting',
+    filter: (s) => s.indicators.supertrend.signal === 'BUY',
+  },
+  {
+    id: 'strong_buy', name: 'Strong Buy (Score > 10)', emoji: '💪', category: 'strength',
+    description: 'Multiple indicators agree on strong BUY signal',
+    filter: (s) => s.score >= 10,
+  },
+  {
+    id: 'high_confidence', name: 'High Confidence (>80%)', emoji: '🎯', category: 'strength',
+    description: 'Signals with 80%+ confidence — Highest probability',
+    filter: (s) => s.confidence >= 80,
+  },
+  {
+    id: 'breakout', name: 'Breakout Stocks', emoji: '🔥', category: 'pattern',
+    description: 'Breaking above resistance with volume confirmation',
+    filter: (s) => s.signal.includes('BUY') && s.indicators.volume.ratio > 1.5 && s.chartPatterns.length > 0,
+  },
+  {
+    id: 'golden_cross', name: 'Golden Cross Zone', emoji: '✨', category: 'momentum',
+    description: 'EMA50 near or above EMA200 — Long-term bullish shift',
+    filter: (s) => s.indicators.ema50 > s.indicators.ema200,
+  },
+  {
+    id: 'best_rr', name: 'Best Risk:Reward (>3:1)', emoji: '⚖️', category: 'strength',
+    description: 'Trades offering 3:1+ reward for every unit of risk',
+    filter: (s) => s.tradeSetup.riskRewardRatio >= 3,
+  },
+  {
+    id: 'bearish', name: 'Bearish / Short Candidates', emoji: '🐻', category: 'reversal',
+    description: 'Strong sell signals — For shorting or exiting longs',
+    filter: (s) => s.signal.includes('SELL') && s.score <= -7,
+  },
+];
+═══════════════════════════════════════════════════════════════
+FILE 8: src/renderer/screens/ScannerScreen.tsx
+STOCK SCANNER SCREEN
+═══════════════════════════════════════════════════════════════
+
+Build a complete scanner screen:
+
+Title: "🔍 Smart Stock Scanner"
+Filter buttons row: All 10 SCREENER_FILTERS as horizontally scrollable chips
+Selected filter shows as active (blue bg)
+"Scan All 50 Stocks" button — runs generateLiveSignal on all STOCK_DATABASE stocks
+Progress bar during scanning: "Scanning 23/50 stocks... HDFCBANK"
+Results list sorted by signal strength:
+Green section: BUY signals (strongest first)
+Gray section: NEUTRAL
+Red section: SELL signals
+Each result card: Symbol, Name, Signal badge, Score, Confidence ring, Quick trade setup
+Click result → Navigate to chart screen for that stock
+"Export Results" button — copies CSV to clipboard
+Show scan stats: "Found: 8 Buy, 3 Sell, 39 Neutral"
+Watermark: "Made with ❤️ by Shahrukh"
+═══════════════════════════════════════════════════════════════
+FILE 9: src/renderer/screens/AccountScreen.tsx
+ACCOUNT SCREEN
+═══════════════════════════════════════════════════════════════
+
+Build a complete account screen wrapping:
+
+If not connected: Show AngelOne login form
+Input: Client ID (e.g., "S1234567")
+Input: Password (masked)
+Input: API Key
+Input: TOTP (6 digits)
+"🔌 Connect to Angel One" button
+Loading states during login
+Error messages with troubleshooting
+Link to get API key: "Get SmartAPI key from smartapi.angelone.in"
+If connected: Show AccountDashboard component
+Below dashboard: Tabs for "Holdings" | "Positions" | "Orders"
+Holdings tab: List of holdings from getHoldings() — each shows stock, qty, avg, CMP, P&L colored
+Positions tab: Open positions with unrealized P&L
+Orders tab: Order book with cancel button for open orders
+"Logout" button at bottom
+Watermark: "Made with ❤️ by Shahrukh"
+═══════════════════════════════════════════════════════════════
+FILE 10: UPDATE src/renderer/App.tsx
+ADD NEW ROUTES AND SIDEBAR ITEMS
+═══════════════════════════════════════════════════════════════
+
+Update the existing App.tsx to add:
+
+New sidebar items:
+🏠 Home → /
+📊 Charts → /charts (includes StockSearch at top)
+⚡ Signals → /signals
+🎯 Strategies → /strategies (NEW)
+🔍 Scanner → /scanner (NEW)
+💼 Portfolio → /portfolio
+👤 Account → /account (NEW)
+⚙️ Settings → /settings
+New routes for StrategyScreen, ScannerScreen, AccountScreen
+StockSearch component integrated into ChartScreen header
+Connection status dots in title bar reading from angelOneService
+═══════════════════════════════════════════════════════════════
+EVERY SCREEN: Watermark "Made with ❤️ by Shahrukh" at bottom
+═══════════════════════════════════════════════════════════════
+
+Build ALL files with COMPLETE code. Every function must be fully implemented. Every component must render complete UI. No shortcuts.
+
+text
+
+
+---
+
+## 📋 Follow-Up Prompts After Build
+
+### Fix 1 — If strategies don't execute properly:
+Fix the strategy execute functions in strategies.ts. Each strategy must:
+
+Extract closes, highs, lows, volumes from candles array
+Calculate required indicators using the imported functions (EMA, RSI, MACD, etc.)
+Use a helper function last(arr) to get the latest non-NaN value from indicator arrays
+Check specific entry conditions and return triggered=true with full trade setup if met
+Return action='HOLD' with reasoning if not triggered
+Include specific ₹ prices and indicator values in every reasoning string
+Test by calling: const signal = getAllStrategies()[0].execute(mockCandles);
+text
+
+
+### Fix 2 — If stock search dropdown doesn't work:
+Fix StockSearch component. The dropdown must:
+
+Use useState for query, results, isOpen, highlightedIndex
+Use useRef for the container div and input
+Debounce with useEffect + setTimeout(250ms) calling angelOneService.searchStocks(query)
+Dropdown div: position absolute, top 100%, left 0, width 100%, zIndex 1000, background #12121A, border 1px solid #2A2A3E, borderRadius 12px, maxHeight 400px, overflowY auto
+Close on click outside using document.addEventListener('mousedown') in useEffect
+Arrow keys change highlightedIndex, Enter selects highlighted result
+Each result row: display flex, padding 12px 16px, cursor pointer, hover background #222238
+text
+
+
+### Fix 3 — If account connection fails:
+Fix the Angel One login flow. The login form must:
+
+Have 4 input fields: clientId, password, apiKey, totp — all using the Input component
+Password and API key fields have eye toggle for visibility
+TOTP field has maxLength=6 and inputMode="numeric"
+Submit button calls angelOneService.login() with all 4 fields
+Show loading spinner on button during login
+On success: Show success toast, switch to AccountDashboard view
+On error: Show error message below form with specific troubleshooting tips
+On demo mode: Show yellow banner "Running in Demo Mode — simulated data"
+Store connection state in useSettingsStore
+text
+
+
+### Fix 4 — If market condition detection is wrong:
+Fix detectMarketCondition in strategies.ts. It must:
+
+Calculate EMA 20, 50, 200 and ADX using the imported functions
+Get latest values using the last() helper
+Determine trend from EMA alignment: all aligned up = UPTREND, all down = DOWNTREND
+Use ADX: > 40 = STRONG trend, > 25 = trend, < 20 = no trend
+Use BB bandwidth: > 8 = VOLATILE, < 3 = LOW_VOLATILITY
+Return the condition, description string, ADX value, trend direction, volatility, and list of best strategy IDs
+The bestStrategies array must contain strategy IDs that match the strategies created in getAllStrategies()
