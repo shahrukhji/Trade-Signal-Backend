@@ -92,12 +92,44 @@ SMA, EMA, RSI, MACD, BollingerBands, Stochastic, ATR, Supertrend, ADX, VWAP, OBV
 - Frontend: `pnpm --filter @workspace/tradesignal-pro run dev`
 - Codegen: `pnpm --filter @workspace/api-spec run codegen`
 
+### Broker Integration — `artifacts/tradesignal-pro/src/broker/angelOne.ts`
+
+**AngelOneService** (singleton `angelOne`):
+- `login(credentials)` — calls SmartAPI, falls back to demo mode on network failure
+- `logout()` / `refreshSession()` — JWT management
+- `restoreSession(session, isDemo, apiKey)` — re-hydrate service from localStorage on app launch
+- `getWalletBalance()` / `getHoldings()` / `getPositions()` — portfolio data
+- `getOrderBook()` / `placeOrder()` / `modifyOrder()` / `cancelOrder()` — order management
+- `getQuote()` / `getCandleData()` — market data (live or mock)
+- `searchStock(query)` — fuzzy search over 50 NSE NIFTY stocks
+- `placeBracketOrder()` / `placeGTTOrder()` — advanced order types
+- All methods instantly return rich mock data when session is null or in demo mode
+
+**Store integration** (`use-store.ts`):
+- `brokerSession`, `brokerProfile`, `brokerIsDemo`, `brokerApiKey` — persisted to localStorage
+- `walletBalance`, `holdings`, `positions`, `orderBook` — live data (in-memory)
+- `setBrokerSession()` / `clearBrokerSession()` — connect/disconnect actions
+
+**Settings screen** — full live broker login form:
+- Client Code, Password/PIN (with show/hide), SmartAPI Key, TOTP fields
+- Real-time connect button with loading state + error display
+- Connected profile card (avatar initials, exchanges, products, last login)
+- Disconnect button, AI config tab, trading prefs tab
+
+**Portfolio screen** — fully live:
+- Portfolio Value, Invested, Overall P&L%, Today's P&L, Available Cash from wallet
+- Open Positions section (auto-shown if positions exist)
+- Holdings list with company name, qty, avg price, P&L, day change, animated P&L bar
+- Orders tab: full order book with status badges (complete/open/trigger/cancelled)
+- Refresh button (pulls fresh data from service)
+
 ## Key Files
 - `artifacts/api-server/src/routes/index.ts` — All API routes
-- `artifacts/api-server/src/lib/signal-engine.ts` — Signal scoring
-- `artifacts/api-server/src/lib/indicators.ts` — Technical indicators
+- `artifacts/tradesignal-pro/src/broker/angelOne.ts` — Angel One SmartAPI integration
 - `artifacts/tradesignal-pro/src/App.tsx` — Route config
 - `artifacts/tradesignal-pro/src/components/Layout.tsx` — Bottom nav + paper mode banner
 - `artifacts/tradesignal-pro/src/components/ChartWidget.tsx` — lightweight-charts v5 wrapper
-- `artifacts/tradesignal-pro/src/hooks/use-trading.ts` — Mock data + indicator hooks
-- `artifacts/tradesignal-pro/src/store/use-store.ts` — Zustand global state
+- `artifacts/tradesignal-pro/src/hooks/use-trading.ts` — Engine hooks
+- `artifacts/tradesignal-pro/src/store/use-store.ts` — Zustand global state (with broker session)
+- `artifacts/tradesignal-pro/src/pages/Settings.tsx` — Broker login + AI + prefs
+- `artifacts/tradesignal-pro/src/pages/Portfolio.tsx` — Live holdings/positions/orders
