@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Eye, EyeOff, Link, Loader2, LogOut, User, ExternalLink } from 'lucide-react';
+import { Eye, EyeOff, Link, Loader2, LogOut, User, ExternalLink, Wifi } from 'lucide-react';
 import { angelOne } from '@/broker/angelOne';
 import { useStore } from '@/store/use-store';
 import { AccountDashboard } from '@/components/AccountDashboard';
@@ -29,8 +29,67 @@ export function AccountScreen() {
   const [showPass, setShowPass] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [quickLoading, setQuickLoading] = useState(false);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<Tab>('holdings');
+  const [configStatus, setConfigStatus] = useState<{ allConfigured: boolean; hasTotpSecret: boolean } | null>(null);
+
+  useEffect(() => {
+    fetch('/api/broker-proxy/config-status')
+      .then(r => r.json())
+      .then(setConfigStatus)
+      .catch(() => {});
+  }, []);
+
+  // Quick Connect using pre-configured Replit secrets
+  const handleQuickConnect = async () => {
+    setQuickLoading(true);
+    setError('');
+    try {
+      const res = await fetch('/api/broker-proxy/auto-login', { method: 'POST' });
+      const data = await res.json();
+      if (data.status && data.data) {
+        const d = data.data;
+        const clientName = d._name || 'Trader';
+        const session = {
+          jwtToken: d.jwtToken,
+          refreshToken: d.refreshToken,
+          feedToken: d.feedToken,
+          clientId: d._clientCode || '',
+          clientName,
+          email: d._email || '',
+          phone: d._phone || '',
+          exchanges: d._exchanges || ['NSE', 'BSE'],
+          products: d._products || ['DELIVERY', 'INTRADAY'],
+          lastLoginTime: new Date().toISOString(),
+          broker: 'Angel One',
+        };
+        const savedApiKey = d._apiKey || '';
+        angelOne.restoreSession(session, false, savedApiKey);
+        const initials = clientName.split(' ').filter(Boolean).map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || 'T';
+        const profile = {
+          clientId: session.clientId,
+          clientName,
+          email: session.email,
+          phone: session.phone,
+          pan: 'XXXXX0000X',
+          dematId: '',
+          broker: 'Angel One',
+          exchanges: session.exchanges,
+          products: session.products,
+          lastLoginTime: session.lastLoginTime,
+          avatarInitials: initials,
+        };
+        setBrokerSession(session, profile, false, savedApiKey);
+        toast.success(`Connected as ${clientName}`);
+      } else {
+        setError(data.message || 'Quick Connect failed. Check your Replit Secrets.');
+      }
+    } catch (err: any) {
+      setError('Quick Connect error: ' + (err?.message || 'Unknown'));
+    }
+    setQuickLoading(false);
+  };
 
   const handleLogin = async () => {
     if (!clientId.trim() || !password.trim() || !apiKey.trim()) {
@@ -66,10 +125,52 @@ export function AccountScreen() {
           <p className="text-xs text-muted-foreground mt-1">Connect to Angel One SmartAPI</p>
         </div>
 
+        {/* Quick Connect Card — shown when all secrets are pre-configured */}
+        {configStatus?.allConfigured && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass-panel border border-accent/30 rounded-2xl p-4 mb-4"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-8 h-8 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center">
+                <Wifi size={14} className="text-accent" />
+              </div>
+              <div>
+                <p className="text-sm font-bold text-foreground">Quick Connect (Auto)</p>
+                <p className="text-[11px] text-muted-foreground">Credentials pre-configured in Replit Secrets</p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleQuickConnect}
+              disabled={quickLoading}
+              className="w-full h-12 rounded-2xl bg-accent text-background font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-60 shadow-lg shadow-accent/20"
+            >
+              {quickLoading ? (
+                <><Loader2 size={16} className="animate-spin" /> Connecting...</>
+              ) : (
+                <><Wifi size={16} /> Quick Connect (Auto)</>
+              )}
+            </button>
+
+            <p className="text-[10px] text-center text-muted-foreground mt-2">
+              {configStatus.hasTotpSecret ? '✓ All credentials pre-configured · TOTP auto-generated' : '✓ All credentials configured'}
+            </p>
+
+            <div className="flex items-center gap-2 mt-3">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-[10px] text-muted-foreground">OR ENTER MANUALLY</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+          </motion.div>
+        )}
+
         {/* Angel One Login Card */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: configStatus?.allConfigured ? 0.1 : 0 }}
           className="glass-panel border border-border rounded-2xl p-5 mb-4"
         >
           <div className="flex items-center gap-3 mb-4">
@@ -253,7 +354,6 @@ export function AccountScreen() {
                       </p>
                     </div>
                   </div>
-                  {/* P&L bar */}
                   <div className="h-1 bg-input rounded-full overflow-hidden">
                     <div
                       className="h-full rounded-full"
