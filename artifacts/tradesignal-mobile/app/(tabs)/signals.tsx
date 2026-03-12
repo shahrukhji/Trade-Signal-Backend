@@ -67,16 +67,51 @@ function SignalCard({ item }: { item: Signal }) {
 
       <ScoreMeter score={item.score} />
 
-      {expanded && item.indicators.length > 0 && (
+      {expanded && (
         <View style={styles.indicatorsWrap}>
-          <Text style={styles.indicatorsLabel}>CONFLUENT INDICATORS</Text>
-          <View style={styles.indicatorChips}>
-            {item.indicators.map((ind, i) => (
-              <View key={i} style={styles.indChip}>
-                <Text style={styles.indChipText}>{ind}</Text>
+          {(item.ltp != null || item.target1 != null || item.stopLoss != null) && (
+            <View style={styles.tradePlan}>
+              <Text style={styles.tradePlanLabel}>TRADE PLAN</Text>
+              <View style={styles.tradePlanRow}>
+                {item.ltp != null && (
+                  <View style={styles.tradePlanItem}>
+                    <Text style={styles.tpLabel}>Entry</Text>
+                    <Text style={styles.tpVal}>₹{item.ltp.toFixed(2)}</Text>
+                  </View>
+                )}
+                {item.target1 != null && (
+                  <View style={[styles.tradePlanItem, { borderLeftWidth: 1, borderLeftColor: COLORS.divider }]}>
+                    <Text style={styles.tpLabel}>Target</Text>
+                    <Text style={[styles.tpVal, { color: COLORS.accent }]}>₹{item.target1.toFixed(2)}</Text>
+                  </View>
+                )}
+                {item.stopLoss != null && (
+                  <View style={[styles.tradePlanItem, { borderLeftWidth: 1, borderLeftColor: COLORS.divider }]}>
+                    <Text style={styles.tpLabel}>Stop Loss</Text>
+                    <Text style={[styles.tpVal, { color: COLORS.red }]}>₹{item.stopLoss.toFixed(2)}</Text>
+                  </View>
+                )}
+                {item.riskReward != null && (
+                  <View style={[styles.tradePlanItem, { borderLeftWidth: 1, borderLeftColor: COLORS.divider }]}>
+                    <Text style={styles.tpLabel}>R:R</Text>
+                    <Text style={[styles.tpVal, { color: COLORS.yellow }]}>1:{item.riskReward.toFixed(1)}</Text>
+                  </View>
+                )}
               </View>
-            ))}
-          </View>
+            </View>
+          )}
+          {item.indicators.length > 0 && (
+            <>
+              <Text style={styles.indicatorsLabel}>SIGNAL REASONS</Text>
+              <View style={styles.indicatorChips}>
+                {item.indicators.slice(0, 6).map((ind, i) => (
+                  <View key={i} style={styles.indChip}>
+                    <Text style={styles.indChipText}>{ind}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
           {item.rsi != null && (
             <View style={styles.extraRow}>
               <View style={styles.extraItem}>
@@ -85,14 +120,6 @@ function SignalCard({ item }: { item: Signal }) {
                   color: item.rsi < 35 ? COLORS.accent : item.rsi > 65 ? COLORS.red : COLORS.textSub
                 }]}>{item.rsi.toFixed(1)}</Text>
               </View>
-              {item.changePercent != null && (
-                <View style={styles.extraItem}>
-                  <Text style={styles.extraLabel}>Change</Text>
-                  <Text style={[styles.extraVal, { color: (item.changePercent ?? 0) >= 0 ? COLORS.accent : COLORS.red }]}>
-                    {(item.changePercent ?? 0) >= 0 ? '+' : ''}{(item.changePercent ?? 0).toFixed(2)}%
-                  </Text>
-                </View>
-              )}
             </View>
           )}
         </View>
@@ -246,4 +273,10 @@ const styles = StyleSheet.create({
   extraLabel: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted },
   extraVal: { fontSize: 12, fontFamily: FONTS.semibold },
   cardFooter: { alignItems: 'center' },
+  tradePlan: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: RADIUS.sm, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.divider },
+  tradePlanLabel: { fontSize: 9, fontFamily: FONTS.bold, color: COLORS.textMuted, letterSpacing: 1, padding: 8, paddingBottom: 4 },
+  tradePlanRow: { flexDirection: 'row' },
+  tradePlanItem: { flex: 1, padding: 8, alignItems: 'center' },
+  tpLabel: { fontSize: 9, fontFamily: FONTS.regular, color: COLORS.textMuted },
+  tpVal: { fontSize: 12, fontFamily: FONTS.semibold, color: COLORS.text, marginTop: 2 },
 });

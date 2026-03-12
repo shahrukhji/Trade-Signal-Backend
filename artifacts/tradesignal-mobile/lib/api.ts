@@ -116,6 +116,9 @@ export interface Signal {
   rsi?: number;
   change?: number;
   changePercent?: number;
+  target1?: number;
+  stopLoss?: number;
+  riskReward?: number;
 }
 
 export interface FundsData {
