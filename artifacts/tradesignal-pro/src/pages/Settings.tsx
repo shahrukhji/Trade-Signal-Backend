@@ -128,36 +128,40 @@ export function Settings() {
       const res = await fetch('/api/broker-proxy/auto-login', { method: 'POST' });
       const data = await res.json();
       if (data.status && data.data) {
+        const d = data.data;
+        // Profile data comes from _name/_email/_exchanges (fetched server-side after login)
+        const clientName = d._name || 'Trader';
         const session = {
-          jwtToken: data.data.jwtToken,
-          refreshToken: data.data.refreshToken,
-          feedToken: data.data.feedToken,
-          clientId: data.data._clientCode || data.data.clientcode || '',
-          clientName: data.data.name || 'Trader',
-          email: data.data.email || '',
-          phone: data.data.mobileno || '',
-          exchanges: data.data.exchanges || ['NSE', 'BSE'],
-          products: data.data.products || ['DELIVERY', 'INTRADAY'],
-          lastLoginTime: data.data.lastlogintime || new Date().toISOString(),
+          jwtToken: d.jwtToken,
+          refreshToken: d.refreshToken,
+          feedToken: d.feedToken,
+          clientId: d._clientCode || '',
+          clientName,
+          email: d._email || '',
+          phone: d._phone || '',
+          exchanges: d._exchanges || ['NSE', 'BSE'],
+          products: d._products || ['DELIVERY', 'INTRADAY'],
+          lastLoginTime: new Date().toISOString(),
           broker: 'Angel One',
         };
-        const savedApiKey = data.data._apiKey || '';
+        const savedApiKey = d._apiKey || '';
         await angelOne.restoreSession(session, false, savedApiKey);
+        const initials = clientName.split(' ').filter(Boolean).map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || 'T';
         const profile = {
           clientId: session.clientId,
-          clientName: session.clientName,
+          clientName,
           email: session.email,
           phone: session.phone,
-          pan: data.data.pan || 'XXXXX0000X',
-          dematId: data.data.dematId || '',
+          pan: 'XXXXX0000X',
+          dematId: '',
           broker: 'Angel One',
           exchanges: session.exchanges,
           products: session.products,
           lastLoginTime: session.lastLoginTime,
-          avatarInitials: session.clientName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2),
+          avatarInitials: initials,
         };
         setBrokerSession(session, profile, false, savedApiKey);
-        toast.success(`Connected as ${session.clientName}`);
+        toast.success(`Connected as ${clientName}`);
         setTimeout(async () => { const bal = await angelOne.getWalletBalance(); setWallet(bal); }, 800);
       } else {
         setLoginError(data.message || 'Quick Connect failed. Check your Replit secrets.');
@@ -171,13 +175,16 @@ export function Settings() {
   const handleConnect = async () => {
     if (!clientId.trim()) { setLoginError('Client ID is required'); return; }
     if (!password.trim()) { setLoginError('Password / PIN is required'); return; }
-    if (!apiKey.trim()) { setLoginError('SmartAPI Key is required'); return; }
+    // API key required only if not already configured via env var
+    if (!configStatus?.hasApiKey && !apiKey.trim()) {
+      setLoginError('SmartAPI Key is required'); return;
+    }
 
     setLoginLoading(true);
     setLoginError('');
 
-    // TOTP is auto-injected server-side from ANGELONE_TOTP_SECRET if configured;
-    // pass empty string so the proxy injects it from env var.
+    // TOTP is auto-injected server-side; pass empty so proxy generates it from env var.
+    // API key from form (or proxy uses env var if empty).
     const result = await angelOne.login(
       { clientId: clientId.trim().toUpperCase(), password: password.trim(), apiKey: apiKey.trim(), totp: '' },
       { strict: true }
@@ -514,32 +521,42 @@ export function Settings() {
                       </div>
                     </div>
 
-                    {/* SmartAPI Key */}
-                    <div>
-                      <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        SmartAPI Key <span className="text-destructive">*</span>
-                      </label>
-                      <div className="relative">
-                        <Key size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input
-                          type={showApiKey ? 'text' : 'password'}
-                          value={apiKey}
-                          onChange={(e) => { setApiKey(e.target.value); setLoginError(''); }}
-                          placeholder="From smartapi.angelone.in"
-                          className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-10 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
-                          autoComplete="off"
-                        />
-                        <button
-                          onClick={() => setShowApiKey(!showApiKey)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                        >
-                          {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
-                        </button>
+                    {/* SmartAPI Key — hidden when already configured via env var */}
+                    {configStatus?.hasApiKey ? (
+                      <div className="flex items-center gap-2 bg-primary/5 border border-primary/15 rounded-xl px-3 py-2.5">
+                        <Key size={13} className="text-primary" />
+                        <div>
+                          <p className="text-[11px] font-semibold text-foreground">SmartAPI Key Configured ✓</p>
+                          <p className="text-[9px] text-muted-foreground">ANGELONE_API_KEY is set in Replit Secrets</p>
+                        </div>
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-1">
-                        Create your API key at <span className="text-accent">smartapi.angelone.in</span>
-                      </p>
-                    </div>
+                    ) : (
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                          SmartAPI Key <span className="text-destructive">*</span>
+                        </label>
+                        <div className="relative">
+                          <Key size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                          <input
+                            type={showApiKey ? 'text' : 'password'}
+                            value={apiKey}
+                            onChange={(e) => { setApiKey(e.target.value); setLoginError(''); }}
+                            placeholder="From smartapi.angelone.in"
+                            className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-10 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
+                            autoComplete="off"
+                          />
+                          <button
+                            onClick={() => setShowApiKey(!showApiKey)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                          >
+                            {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">
+                          Create your API key at <span className="text-accent">smartapi.angelone.in</span>
+                        </p>
+                      </div>
+                    )}
 
                     {/* TOTP info — auto-generated server-side */}
                     <div className="flex items-center gap-2 bg-primary/5 border border-primary/15 rounded-xl px-3 py-2.5">

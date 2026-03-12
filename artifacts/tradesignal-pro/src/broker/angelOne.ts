@@ -291,22 +291,39 @@ class AngelOneService {
             refreshToken: data.data.refreshToken,
             feedToken: data.data.feedToken,
             clientId: credentials.clientId,
-            clientName: data.data.name || 'Trader',
-            email: data.data.email || '',
-            phone: data.data.mobileno || '',
-            exchanges: data.data.exchanges || ['NSE', 'BSE'],
-            products: data.data.products || ['DELIVERY', 'INTRADAY'],
-            lastLoginTime: data.data.lastlogintime || new Date().toISOString(),
+            clientName: 'Trader', // will be overwritten by profile fetch below
+            email: '',
+            phone: '',
+            exchanges: ['NSE', 'BSE'],
+            products: ['DELIVERY', 'INTRADAY'],
+            lastLoginTime: new Date().toISOString(),
             broker: 'Angel One',
           };
+
+          // Fetch actual profile to get real name, email, exchanges etc.
+          try {
+            const profRes = await fetch(
+              `${this.baseUrl}/rest/secure/angelbroking/user/v1/getProfile`,
+              { method: 'GET', headers: this.getHeaders(), signal: AbortSignal.timeout(8000) }
+            );
+            const profData = await profRes.json();
+            if (profData.status && profData.data) {
+              const p = profData.data;
+              this.session.clientName = p.name || p.clientname || credentials.clientId;
+              this.session.email = p.email || '';
+              this.session.phone = p.mobileno || '';
+              this.session.exchanges = p.exchanges || ['NSE', 'BSE'];
+              this.session.products = p.products || ['DELIVERY', 'INTRADAY'];
+            }
+          } catch { /* profile fetch optional — login still succeeds */ }
 
           const profile: AccountProfile = {
             clientId: credentials.clientId,
             clientName: this.session.clientName,
             email: this.session.email,
             phone: this.session.phone,
-            pan: data.data.pan || 'XXXXX0000X',
-            dematId: data.data.dematId || '',
+            pan: 'XXXXX0000X',
+            dematId: '',
             broker: 'Angel One',
             exchanges: this.session.exchanges,
             products: this.session.products,

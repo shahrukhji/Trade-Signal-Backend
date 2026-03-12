@@ -1,11 +1,9 @@
 // ─── Angel One SmartAPI Proxy ────────────────────────────────────────────────
-// Forwards browser requests server-side so Angel One CORS restrictions don't apply.
-// All paths under /api/broker-proxy/* are forwarded to https://apiconnect.angelone.in/*
-// Automatically generates TOTP from ANGELONE_TOTP_SECRET env var when available.
+// Server-side proxy: avoids CORS, auto-generates TOTP, fetches profile after login.
 import { Router, type Request, type Response } from "express";
 import { createHmac } from "crypto";
 
-// ─── RFC 6238 TOTP Implementation (no external deps) ─────────────────────────
+// ─── RFC 6238 TOTP (no external deps) ────────────────────────────────────────
 function base32Decode(encoded: string): Buffer {
   const CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
   let bits = 0, value = 0;
@@ -36,12 +34,38 @@ function generateTOTP(secret: string, step = 30): string {
   return String(code % 1_000_000).padStart(6, "0");
 }
 
+// ─── Angel One profile fetch (after login) ────────────────────────────────────
+async function fetchAngelProfile(jwt: string, apiKey: string): Promise<any> {
+  try {
+    const r = await fetch(
+      "https://apiconnect.angelone.in/rest/secure/angelbroking/user/v1/getProfile",
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "127.0.0.1",
+          "X-ClientPublicIP": "1.2.3.4",
+          "X-MACAddress": "00:00:00:00:00:00",
+          "X-PrivateKey": apiKey,
+          "Authorization": `Bearer ${jwt}`,
+        },
+        signal: AbortSignal.timeout(10000),
+      }
+    );
+    const p: any = await r.json();
+    return p.status ? p.data : null;
+  } catch {
+    return null;
+  }
+}
+
 const router = Router();
 const ANGEL_BASE = "https://apiconnect.angelone.in";
 const LOGIN_PATH = "/rest/auth/angelbroking/user/v1/loginByPassword";
 
-// ─── Config Status ────────────────────────────────────────────────────────────
-// Tells the frontend which secrets are pre-configured so it can show Quick Connect
+// ─── Config Status ─────────────────────────────────────────────────────────────
 router.get("/config-status", (_req: Request, res: Response) => {
   res.json({
     hasClientCode: !!process.env.ANGELONE_CLIENT_CODE,
@@ -56,8 +80,8 @@ router.get("/config-status", (_req: Request, res: Response) => {
   });
 });
 
-// ─── Auto-Login ───────────────────────────────────────────────────────────────
-// Uses all pre-configured env var credentials to log in without any user input
+// ─── Auto-Login ────────────────────────────────────────────────────────────────
+// Uses env var credentials + auto-generated TOTP, then fetches real profile name.
 router.post("/auto-login", async (_req: Request, res: Response) => {
   const clientCode = process.env.ANGELONE_CLIENT_CODE;
   const pin = process.env.ANGELONE_PIN;
@@ -67,13 +91,14 @@ router.post("/auto-login", async (_req: Request, res: Response) => {
   if (!clientCode || !pin || !apiKey || !totpSecret) {
     return res.status(400).json({
       status: false,
-      message: "Missing required env vars: ANGELONE_CLIENT_CODE, ANGELONE_PIN, ANGELONE_API_KEY, ANGELONE_TOTP_SECRET",
+      message:
+        "Missing env vars. Set ANGELONE_CLIENT_CODE, ANGELONE_PIN, ANGELONE_API_KEY, ANGELONE_TOTP_SECRET in Replit Secrets.",
     });
   }
 
   try {
     const totp = generateTOTP(totpSecret);
-    const upstream = await fetch(`${ANGEL_BASE}${LOGIN_PATH}`, {
+    const loginRes = await fetch(`${ANGEL_BASE}${LOGIN_PATH}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -88,23 +113,36 @@ router.post("/auto-login", async (_req: Request, res: Response) => {
       body: JSON.stringify({ clientcode: clientCode, password: pin, totp }),
       signal: AbortSignal.timeout(15000),
     });
-    const data: any = await upstream.json();
-    // Attach the pre-configured client code so the frontend can build a proper session
+    const data: any = await loginRes.json();
+
     if (data.status && data.data) {
+      // Fetch the real profile to get trader name, email, phone, etc.
+      const profile = await fetchAngelProfile(data.data.jwtToken, apiKey);
+
       data.data._clientCode = clientCode;
       data.data._apiKey = apiKey;
+      // Embed profile fields so the frontend can display them without an extra call
+      if (profile) {
+        data.data._name = profile.name || profile.clientname || '';
+        data.data._email = profile.email || '';
+        data.data._phone = profile.mobileno || '';
+        data.data._exchanges = profile.exchanges || ['NSE', 'BSE'];
+        data.data._products = profile.products || ['DELIVERY', 'INTRADAY'];
+      }
     }
-    return res.status(upstream.status).json(data);
+
+    return res.status(loginRes.status).json(data);
   } catch (err: any) {
     const isTimeout = err?.name === "TimeoutError" || err?.name === "AbortError";
     return res.status(503).json({
       status: false,
-      message: isTimeout ? "Request timed out" : `Auto-login error: ${err?.message}`,
+      message: isTimeout ? "Request timed out." : `Auto-login error: ${err?.message}`,
     });
   }
 });
 
-// ─── Header Builder ───────────────────────────────────────────────────────────
+// ─── Header Builder ────────────────────────────────────────────────────────────
+// Falls back to env var API key so authenticated calls work even without user-entered key.
 function buildForwardHeaders(req: Request): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -115,27 +153,29 @@ function buildForwardHeaders(req: Request): Record<string, string> {
     "X-ClientPublicIP": "1.2.3.4",
     "X-MACAddress": "00:00:00:00:00:00",
   };
-  const privateKey = req.headers["x-privatekey"] as string;
+  // Use request header, or fall back to configured env var
+  const privateKey =
+    (req.headers["x-privatekey"] as string) ||
+    process.env.ANGELONE_API_KEY ||
+    "";
   const authorization = req.headers["authorization"] as string;
   if (privateKey) headers["X-PrivateKey"] = privateKey;
   if (authorization) headers["Authorization"] = authorization;
   return headers;
 }
 
-// ─── Generic Passthrough Proxy ────────────────────────────────────────────────
+// ─── Generic Passthrough Proxy ─────────────────────────────────────────────────
 router.use(async (req: Request, res: Response) => {
   const targetUrl = `${ANGEL_BASE}${req.path}`;
 
   try {
     let body = req.body;
 
-    // Auto-inject TOTP for login requests if TOTP_SECRET is configured in env
+    // Auto-inject TOTP for login requests when TOTP_SECRET is configured
     if (req.method === "POST" && req.path === LOGIN_PATH) {
       const totpSecret = process.env.ANGELONE_TOTP_SECRET;
       if (totpSecret) {
-        const generatedTotp = generateTOTP(totpSecret);
-        // Always use env-generated TOTP — more reliable than user-entered code
-        body = { ...body, totp: generatedTotp };
+        body = { ...body, totp: generateTOTP(totpSecret) };
       }
     }
 
