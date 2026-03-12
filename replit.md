@@ -46,9 +46,34 @@ A full-stack algorithmic trading signal app for Indian markets (NSE/BSE), optimi
 **Key Features:**
 - Paper Trading Mode (red banner on every screen)
 - Global status dots (Broker | Gemini | Market)
-- Mock data fallback (200 OHLCV candles, live ±tick simulation)
+- Real engine OHLCV generation (250 candles per symbol, live ±tick every 3s)
 - Watermark: "Made with ❤️ by Shahrukh" on every screen
 - localStorage: broker_auth, gemini_config, trading_prefs, watchlist, paper_portfolio, signal_history
+
+### Core Analysis Engine — `artifacts/tradesignal-pro/src/engine/`
+
+**indicators.ts** — 20 pure-math indicator functions:
+SMA, EMA, RSI, MACD, BollingerBands, Stochastic, ATR, Supertrend, ADX, VWAP, OBV, CCI, WilliamsR, MFI, ParabolicSAR, PivotPoints, findSupportResistance, detectRSIDivergence, analyzeVolume, findSwingLow/findSwingHigh
+
+**patterns.ts** — 30 pattern detectors:
+22 candlestick (Doji, Dragonfly/Gravestone Doji, Hammer, Inverted Hammer, Shooting Star, Hanging Man, Bullish/Bearish Engulfing/Harami, Piercing Line, Dark Cloud Cover, Tweezer Top/Bottom, Morning/Evening Star, Three White Soldiers, Three Black Crows, Marubozu, Spinning Top)
+8 chart (Double Bottom, Double Top, Ascending/Descending Triangle, Falling/Rising Wedge, Bull/Bear Flag)
+
+**signalEngine.ts** — Multi-indicator confluence scoring:
+- Scores every indicator: EMA crossovers (±8), MACD (±5), RSI (±5), RSI Divergence (±3), Supertrend (±2), Stochastic (±2), Bollinger Bands (±2), Volume Spike (±3), VWAP (±1), MFI (±2), CCI (±1), ADX (±1), PSAR (±1), S/R levels (±3), candlestick patterns (±3 each), chart patterns (±3 each)
+- Outputs: STRONG_BUY → STRONG_SELL with 0-95% confidence, ATR-based SL/TP, R:R ratio
+- `generateLiveSignal()` — the main function called by the frontend
+
+**monitor.ts** — LiveMarketMonitor class:
+- Continuous scanning with configurable interval
+- Batch + single-stock scan modes
+- Live tick simulation for demo mode
+- createMonitor() factory function
+
+**Integration:**
+- `use-trading.ts` hooks: `useMarketData`, `useIndicators`, `useSignalAnalysis`, `useMultiSignals` all use real engine
+- `ChartScreen.tsx` — shows live RSI, MACD, Supertrend, patterns from engine
+- `Signals.tsx` — shows real engine signals for 8 NIFTY stocks with full detail modal
 
 ### Shared Libraries
 - `lib/api-spec` — OpenAPI 3.0 spec (18 endpoints)
