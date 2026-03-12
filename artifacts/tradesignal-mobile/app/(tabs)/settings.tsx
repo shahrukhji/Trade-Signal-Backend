@@ -3,23 +3,14 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import {
-  ActivityIndicator, Pressable, ScrollView,
-  StyleSheet, Switch, Text, View,
+  ActivityIndicator, Pressable, ScrollView, StyleSheet,
+  Switch, Text, TextInput, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useApp } from '@/context/AppContext';
+import { useApp, type SavedCredentials } from '@/context/AppContext';
 import { COLORS, FONTS, RADIUS } from '@/constants/theme';
 
-interface SectionProps { title: string; children: React.ReactNode }
-function Section({ title, children }: SectionProps) {
-  return (
-    <View style={styles.section}>
-      <Text style={styles.sectionLabel}>{title}</Text>
-      <View style={styles.sectionCard}>{children}</View>
-    </View>
-  );
-}
-
+// ─── Reusable row ─────────────────────────────────────────────────────────────
 interface RowProps {
   icon: string; label: string; sublabel?: string;
   right?: React.ReactNode; onPress?: () => void;
@@ -45,6 +36,49 @@ function Row({ icon, label, sublabel, right, onPress, danger, last }: RowProps) 
   );
 }
 
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionLabel}>{title}</Text>
+      <View style={styles.sectionCard}>{children}</View>
+    </View>
+  );
+}
+
+// ─── Field ────────────────────────────────────────────────────────────────────
+function Field({
+  label, value, onChangeText, placeholder, secure, hint,
+}: {
+  label: string; value: string; onChangeText: (v: string) => void;
+  placeholder: string; secure?: boolean; hint?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <View style={styles.field}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.fieldWrap}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={COLORS.textMuted}
+          secureTextEntry={secure && !show}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={[styles.fieldInput, secure && { paddingRight: 44 }]}
+        />
+        {secure && (
+          <Pressable onPress={() => setShow(v => !v)} style={styles.eyeBtn}>
+            <Feather name={show ? 'eye-off' : 'eye'} size={16} color={COLORS.textMuted} />
+          </Pressable>
+        )}
+      </View>
+      {hint && <Text style={styles.fieldHint}>{hint}</Text>}
+    </View>
+  );
+}
+
+// ─── Strategy guide data ──────────────────────────────────────────────────────
 const STRATEGIES = [
   { name: 'EMA Crossover', desc: 'Fast/slow EMA cross with volume confirmation', params: 'EMA 9/21, Vol 1.5x' },
   { name: 'RSI Reversal', desc: 'Oversold/overbought RSI with price confirmation', params: 'RSI <35 or >65' },
@@ -58,28 +92,69 @@ const STRATEGIES = [
   { name: 'Intraday Momentum', desc: 'Strong momentum with multi-indicator alignment', params: 'RSI + EMA + VWAP' },
 ];
 
-const INDICATORS = [
-  'EMA (9, 21, 50, 200)', 'SMA (20, 50)', 'RSI (14)', 'MACD (12/26/9)',
-  'Bollinger Bands (20, 2)', 'VWAP', 'ATR (14)', 'Supertrend', 'Stochastic',
-  'Williams %R', 'CCI', 'OBV', 'MFI', 'ADX', 'Parabolic SAR',
-  'Pivot Points', 'Fibonacci', 'Ichimoku Cloud',
-];
-
+// ─── Main component ───────────────────────────────────────────────────────────
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { session, configStatus, paperMode, setPaperMode, connectBroker, disconnect, isConnecting, connectError } = useApp();
+  const {
+    session, savedCredentials, paperMode, configStatus,
+    setPaperMode, connectWithSaved, saveCredentials,
+    clearCredentials, disconnect, isConnecting, connectError,
+  } = useApp();
+
+  // Form state for first-time / edit mode
+  const [editMode, setEditMode] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [expandedStrat, setExpandedStrat] = useState<number | null>(null);
 
-  const handleConnect = () => {
+  const [clientCode, setClientCode] = useState(savedCredentials?.clientCode ?? '');
+  const [password, setPassword] = useState(savedCredentials?.password ?? '');
+  const [apiKey, setApiKey] = useState(savedCredentials?.apiKey ?? '');
+  const [totpSecret, setTotpSecret] = useState(savedCredentials?.totpSecret ?? '');
+  const [formError, setFormError] = useState('');
+
+  const handleSaveAndConnect = async () => {
+    if (!clientCode.trim()) return setFormError('Client ID is required');
+    if (!password.trim()) return setFormError('PIN / Password is required');
+    if (!apiKey.trim()) return setFormError('API Key is required');
+    if (!totpSecret.trim()) return setFormError('TOTP Secret is required (for auto-generation)');
+    setFormError('');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    connectBroker();
+    const creds: SavedCredentials = {
+      clientCode: clientCode.trim(),
+      password: password.trim(),
+      apiKey: apiKey.trim(),
+      totpSecret: totpSecret.trim(),
+    };
+    await saveCredentials(creds);
+    setEditMode(false);
   };
+
+  const handleQuickConnect = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    connectWithSaved();
+  };
+
   const handleDisconnect = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     disconnect();
   };
 
+  const handleEditCreds = () => {
+    setClientCode(savedCredentials?.clientCode ?? '');
+    setPassword(savedCredentials?.password ?? '');
+    setApiKey(savedCredentials?.apiKey ?? '');
+    setTotpSecret(savedCredentials?.totpSecret ?? '');
+    setFormError('');
+    setEditMode(true);
+  };
+
+  const handleDeleteCreds = async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    await clearCredentials();
+    setClientCode(''); setPassword(''); setApiKey(''); setTotpSecret('');
+  };
+
+  // ─── Strategy Guide ──────────────────────────────────────────────────────
   if (showGuide) {
     return (
       <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -97,7 +172,7 @@ export default function SettingsScreen() {
           {STRATEGIES.map((s, i) => (
             <Pressable key={i} onPress={() => { setExpandedStrat(expandedStrat === i ? null : i); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
               style={[styles.stratCard, expandedStrat === i && { borderColor: COLORS.accent }]}>
-              <View style={styles.stratRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <View style={styles.stratNum}><Text style={styles.stratNumText}>{i + 1}</Text></View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.stratName}>{s.name}</Text>
@@ -105,42 +180,20 @@ export default function SettingsScreen() {
                 </View>
                 <Feather name={expandedStrat === i ? 'chevron-up' : 'chevron-down'} size={16} color={COLORS.textMuted} />
               </View>
-              {expandedStrat === i && (
-                <Text style={styles.stratDesc}>{s.desc}</Text>
-              )}
+              {expandedStrat === i && <Text style={styles.stratDesc}>{s.desc}</Text>}
             </Pressable>
           ))}
-          <Text style={styles.guideSectionTitle}>INDICATORS ({INDICATORS.length})</Text>
-          <View style={styles.indGrid}>
-            {INDICATORS.map((ind, i) => (
-              <View key={i} style={styles.indItem}>
-                <Feather name="check-circle" size={12} color={COLORS.accent} />
-                <Text style={styles.indName}>{ind}</Text>
-              </View>
-            ))}
-          </View>
-          <Text style={styles.guideSectionTitle}>MARKET HOURS (NSE/BSE)</Text>
-          <View style={styles.hoursCard}>
-            {[
-              { s: 'Pre-Market', t: '09:00 – 09:15' },
-              { s: 'Regular', t: '09:15 – 15:30' },
-              { s: 'Closing', t: '15:30 – 16:00' },
-              { s: 'F&O Expiry', t: 'Every Thursday' },
-              { s: 'Settlement', t: 'T+1 rolling' },
-            ].map((h, i, arr) => (
-              <View key={i} style={[styles.hoursRow, i < arr.length - 1 && { borderBottomWidth: 1, borderBottomColor: COLORS.divider }]}>
-                <Text style={styles.hoursSession}>{h.s}</Text>
-                <Text style={styles.hoursTime}>{h.t}</Text>
-              </View>
-            ))}
-          </View>
         </ScrollView>
       </View>
     );
   }
 
+  // ─── First-time Setup Form OR Edit Credentials ───────────────────────────
+  const showForm = !savedCredentials || editMode;
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Settings</Text>
         {session && (
@@ -149,70 +202,166 @@ export default function SettingsScreen() {
             <Text style={styles.liveText}>LIVE</Text>
           </View>
         )}
+        {!session && savedCredentials && !editMode && (
+          <View style={styles.savedBadge}>
+            <Feather name="check-circle" size={12} color={COLORS.accent} />
+            <Text style={styles.savedText}>Saved</Text>
+          </View>
+        )}
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: insets.bottom + 80 }}>
 
-        {/* Quick Connect Hero — shown when NOT connected */}
-        {!session && (
-          <View style={styles.connectHero}>
-            <LinearGradient
-              colors={['rgba(0,230,118,0.08)', 'rgba(0,230,118,0.02)']}
-              style={styles.connectGradient}
+        {/* ═══ STATE 1: First-time OR Edit Mode — Credential form ═══ */}
+        {showForm && !session && (
+          <View style={styles.formCard}>
+            {/* Title */}
+            <View style={styles.formHeader}>
+              <View style={styles.formIconWrap}>
+                <Feather name={editMode ? 'edit-2' : 'link'} size={22} color={COLORS.accent} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.formTitle}>
+                  {editMode ? 'Update Credentials' : 'Angel One Setup'}
+                </Text>
+                <Text style={styles.formSub}>
+                  {editMode
+                    ? 'Update your saved credentials'
+                    : 'Enter once — saved securely on your device'}
+                </Text>
+              </View>
+              {editMode && (
+                <Pressable onPress={() => setEditMode(false)} style={styles.cancelBtn}>
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </Pressable>
+              )}
+            </View>
+
+            {/* Fields */}
+            <Field
+              label="Client ID *"
+              value={clientCode}
+              onChangeText={setClientCode}
+              placeholder="e.g. A1234567"
+              hint="Your Angel One login ID"
+            />
+            <Field
+              label="PIN / Password *"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Your Angel One PIN"
+              secure
+            />
+            <Field
+              label="SmartAPI Key *"
+              value={apiKey}
+              onChangeText={setApiKey}
+              placeholder="From smartapi.angelone.in"
+              secure
+              hint="Generate at smartapi.angelone.in → Apps"
+            />
+            <Field
+              label="TOTP Secret *"
+              value={totpSecret}
+              onChangeText={setTotpSecret}
+              placeholder="Base32 secret (e.g. JBSWY3DPEHPK3PXP)"
+              secure
+              hint="Enable TOTP in Angel One → My Profile → Security Settings"
+            />
+
+            {/* Error */}
+            {(formError || connectError) ? (
+              <View style={styles.errorBanner}>
+                <Feather name="alert-circle" size={14} color={COLORS.red} />
+                <Text style={styles.errorText}>{formError || connectError}</Text>
+              </View>
+            ) : null}
+
+            {/* Save & Connect button */}
+            <Pressable
+              onPress={handleSaveAndConnect}
+              disabled={isConnecting}
+              style={({ pressed }) => [{ opacity: pressed || isConnecting ? 0.85 : 1 }]}
             >
-              <View style={styles.connectHeroTop}>
-                <View style={styles.connectHeroIcon}>
-                  <Feather name="wifi" size={24} color={COLORS.accent} />
+              <LinearGradient
+                colors={isConnecting ? [COLORS.accentDim, COLORS.accentDim] : ['#00E676', '#00C853']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.saveBtn}
+              >
+                {isConnecting
+                  ? <><ActivityIndicator size="small" color={COLORS.accent} style={{ marginRight: 8 }} /><Text style={[styles.saveBtnText, { color: COLORS.accent }]}>Connecting...</Text></>
+                  : <><Feather name="save" size={18} color="#000" style={{ marginRight: 8 }} /><Text style={styles.saveBtnText}>{editMode ? 'Update & Connect' : 'Save & Connect'}</Text></>
+                }
+              </LinearGradient>
+            </Pressable>
+
+            <Text style={styles.privacyNote}>
+              🔒 Credentials saved locally on your device only. Never sent to third parties.
+            </Text>
+          </View>
+        )}
+
+        {/* ═══ STATE 2: Saved credentials, NOT connected — Quick Connect ═══ */}
+        {savedCredentials && !session && !editMode && (
+          <View style={styles.quickCard}>
+            <LinearGradient
+              colors={['rgba(0,230,118,0.09)', 'rgba(0,230,118,0.02)']}
+              style={styles.quickGradient}
+            >
+              {/* Credential summary */}
+              <View style={styles.credRow}>
+                <View style={styles.credIconWrap}>
+                  <Feather name="user" size={18} color={COLORS.accent} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.connectHeroTitle}>Connect Angel One</Text>
-                  <Text style={styles.connectHeroSub}>SmartAPI · TOTP auto-generated server-side</Text>
+                  <Text style={styles.credId}>{savedCredentials.clientCode}</Text>
+                  <Text style={styles.credSub}>Angel One · API key saved · TOTP auto-generated</Text>
                 </View>
               </View>
 
-              {configStatus?.allConfigured && (
-                <View style={styles.configBadge}>
-                  <Feather name="check-circle" size={12} color={COLORS.accent} />
-                  <Text style={styles.configBadgeText}>All credentials pre-configured in Replit Secrets</Text>
-                </View>
-              )}
-
-              <Pressable
-                onPress={isConnecting ? undefined : handleConnect}
-                disabled={isConnecting}
-                style={({ pressed }) => [styles.connectBtn, pressed && { opacity: 0.85 }]}
-              >
-                <LinearGradient
-                  colors={isConnecting ? [COLORS.accentDim, COLORS.accentDim] : ['#00E676', '#00C853']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.connectBtnGradient}
-                >
-                  {isConnecting ? (
-                    <>
-                      <ActivityIndicator size="small" color={COLORS.accent} style={{ marginRight: 8 }} />
-                      <Text style={[styles.connectBtnText, { color: COLORS.accent }]}>Connecting...</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Feather name="wifi" size={18} color="#000" style={{ marginRight: 8 }} />
-                      <Text style={styles.connectBtnText}>Quick Connect (Auto)</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </Pressable>
-
+              {/* Error from last attempt */}
               {connectError ? (
                 <View style={styles.errorBanner}>
                   <Feather name="alert-circle" size={14} color={COLORS.red} />
                   <Text style={styles.errorText}>{connectError}</Text>
                 </View>
               ) : null}
+
+              {/* Quick Connect button */}
+              <Pressable
+                onPress={isConnecting ? undefined : handleQuickConnect}
+                disabled={isConnecting}
+                style={({ pressed }) => [{ opacity: pressed || isConnecting ? 0.85 : 1 }]}
+              >
+                <LinearGradient
+                  colors={isConnecting ? [COLORS.accentDim, COLORS.accentDim] : ['#00E676', '#00C853']}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                  style={styles.saveBtn}
+                >
+                  {isConnecting
+                    ? <><ActivityIndicator size="small" color={COLORS.accent} style={{ marginRight: 8 }} /><Text style={[styles.saveBtnText, { color: COLORS.accent }]}>Connecting...</Text></>
+                    : <><Feather name="wifi" size={18} color="#000" style={{ marginRight: 8 }} /><Text style={styles.saveBtnText}>Quick Connect</Text></>
+                  }
+                </LinearGradient>
+              </Pressable>
+
+              {/* Edit / Delete row */}
+              <View style={styles.credsActions}>
+                <Pressable onPress={handleEditCreds} style={styles.credsActionBtn}>
+                  <Feather name="edit-2" size={13} color={COLORS.textSub} />
+                  <Text style={styles.credsActionText}>Edit Credentials</Text>
+                </Pressable>
+                <View style={styles.credsActionDivider} />
+                <Pressable onPress={handleDeleteCreds} style={styles.credsActionBtn}>
+                  <Feather name="trash-2" size={13} color={COLORS.red} />
+                  <Text style={[styles.credsActionText, { color: COLORS.red }]}>Remove Saved</Text>
+                </Pressable>
+              </View>
             </LinearGradient>
           </View>
         )}
 
-        {/* Connected Profile Card */}
+        {/* ═══ STATE 3: Connected — Profile card ═══ */}
         {session && (
           <View style={styles.profileCard}>
             <LinearGradient
@@ -222,7 +371,7 @@ export default function SettingsScreen() {
               <View style={styles.profileRow}>
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>
-                    {session.clientName.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                    {session.clientName.split(' ').filter(Boolean).map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'T'}
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
@@ -236,20 +385,24 @@ export default function SettingsScreen() {
               </View>
               <View style={styles.profileTags}>
                 {session.exchanges?.map((ex: string) => (
-                  <View key={ex} style={styles.tag}>
-                    <Text style={styles.tagText}>{ex}</Text>
-                  </View>
+                  <View key={ex} style={styles.tag}><Text style={styles.tagText}>{ex}</Text></View>
                 ))}
                 <View style={[styles.tag, { borderColor: COLORS.accent + '40', backgroundColor: COLORS.accentDim }]}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.accent, marginRight: 4 }} />
                   <Text style={[styles.tagText, { color: COLORS.accent }]}>Connected</Text>
                 </View>
               </View>
+              {savedCredentials && (
+                <Pressable onPress={handleEditCreds} style={styles.editCredsLink}>
+                  <Feather name="edit-2" size={12} color={COLORS.textMuted} />
+                  <Text style={styles.editCredsText}>Edit saved credentials</Text>
+                </Pressable>
+              )}
             </LinearGradient>
           </View>
         )}
 
-        {/* Trading Mode */}
+        {/* ─── Trading Mode ─────────────────────────────────────────────── */}
         <Section title="TRADING MODE">
           <Row
             icon="shield"
@@ -268,32 +421,28 @@ export default function SettingsScreen() {
           />
         </Section>
 
-        {/* Features */}
+        {/* ─── Features ─────────────────────────────────────────────────── */}
         <Section title="FEATURES">
           <Row icon="zap" label="25+ Technical Indicators" sublabel="EMA, MACD, RSI, Bollinger, VWAP, ATR..." />
           <Row icon="target" label="10 Algorithmic Strategies" sublabel="EMA Crossover, Supertrend, VWAP Bounce..." />
-          <Row icon="bar-chart-2" label="Candlestick Patterns" sublabel="Hammer, Doji, Engulfing & 30+ patterns" />
           <Row
             icon="book-open"
             label="Strategy & Indicator Guide"
-            sublabel="Full details on all strategies and indicators"
+            sublabel="Full details on all strategies"
             onPress={() => { setShowGuide(true); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
             last
           />
         </Section>
 
-        {/* Market Info */}
+        {/* ─── Market Info ──────────────────────────────────────────────── */}
         <Section title="MARKET INFORMATION">
           <Row icon="activity" label="Supported Exchanges" sublabel="NSE, BSE, NFO (Futures & Options)" />
-          <Row icon="clock" label="Market Hours" sublabel="Mon–Fri · 09:15 – 15:30 IST" />
-          <Row icon="calendar" label="Settlement" sublabel="T+1 rolling settlement" last />
+          <Row icon="clock" label="Market Hours" sublabel="Mon–Fri · 09:15 – 15:30 IST" last />
         </Section>
 
-        {/* About */}
+        {/* ─── About ────────────────────────────────────────────────────── */}
         <Section title="ABOUT">
-          <Row icon="info" label="TradeSignal Pro" sublabel="v1.0.0 · Angel One SmartAPI" />
-          <Row icon="cpu" label="Engine" sublabel="Real-time multi-indicator analysis" />
-          <Row icon="shield" label="Paper Mode Capital" sublabel="₹10,00,000 virtual funds" last />
+          <Row icon="info" label="TradeSignal Pro" sublabel="v1.0.0 · Angel One SmartAPI" last />
         </Section>
 
         <Text style={styles.footer}>Made with ❤️ by Shahrukh{'\n'}For educational purposes only. Not financial advice.</Text>
@@ -302,6 +451,7 @@ export default function SettingsScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: COLORS.bg },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12 },
@@ -309,19 +459,44 @@ const styles = StyleSheet.create({
   liveBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.accentDim, paddingHorizontal: 10, paddingVertical: 4, borderRadius: RADIUS.full },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.accent },
   liveText: { fontSize: 10, fontFamily: FONTS.bold, color: COLORS.accent, letterSpacing: 1 },
+  savedBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: COLORS.accentDim, paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.full },
+  savedText: { fontSize: 11, fontFamily: FONTS.medium, color: COLORS.accent },
 
-  connectHero: { marginHorizontal: 16, marginBottom: 4, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: 'rgba(0,230,118,0.2)', overflow: 'hidden' },
-  connectGradient: { padding: 16, gap: 12 },
-  connectHeroTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  connectHeroIcon: { width: 44, height: 44, borderRadius: RADIUS.md, backgroundColor: COLORS.accentDim, borderWidth: 1, borderColor: 'rgba(0,230,118,0.25)', alignItems: 'center', justifyContent: 'center' },
-  connectHeroTitle: { fontSize: 15, fontFamily: FONTS.bold, color: COLORS.text },
-  connectHeroSub: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted, marginTop: 2 },
-  configBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.accentDim, paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.md },
-  configBadgeText: { fontSize: 11, fontFamily: FONTS.medium, color: COLORS.accent },
-  connectBtn: { borderRadius: RADIUS.lg, overflow: 'hidden' },
-  connectBtnGradient: { height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.lg },
-  connectBtnText: { fontSize: 15, fontFamily: FONTS.bold, color: '#000' },
+  // ─── Form ──────────────────────────────────────────────────────────────
+  formCard: { marginHorizontal: 16, marginBottom: 4, backgroundColor: COLORS.card, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: COLORS.cardBorder, padding: 16, gap: 12 },
+  formHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 4 },
+  formIconWrap: { width: 44, height: 44, borderRadius: RADIUS.md, backgroundColor: COLORS.accentDim, borderWidth: 1, borderColor: 'rgba(0,230,118,0.25)', alignItems: 'center', justifyContent: 'center' },
+  formTitle: { fontSize: 15, fontFamily: FONTS.bold, color: COLORS.text },
+  formSub: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted, marginTop: 2, lineHeight: 15 },
+  cancelBtn: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: RADIUS.md, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.cardBorder },
+  cancelText: { fontSize: 12, fontFamily: FONTS.medium, color: COLORS.textSub },
+  field: { gap: 4 },
+  fieldLabel: { fontSize: 11, fontFamily: FONTS.semibold, color: COLORS.textMuted, letterSpacing: 0.3 },
+  fieldWrap: { position: 'relative' },
+  fieldInput: {
+    height: 46, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.cardBorder,
+    borderRadius: RADIUS.md, paddingHorizontal: 12, fontSize: 14, fontFamily: FONTS.regular,
+    color: COLORS.text,
+  },
+  eyeBtn: { position: 'absolute', right: 12, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', width: 36 },
+  fieldHint: { fontSize: 10, fontFamily: FONTS.regular, color: COLORS.textMuted, lineHeight: 14 },
+  saveBtn: { height: 50, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: RADIUS.lg },
+  saveBtnText: { fontSize: 15, fontFamily: FONTS.bold, color: '#000' },
+  privacyNote: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted, textAlign: 'center', lineHeight: 16 },
 
+  // ─── Quick Connect card ─────────────────────────────────────────────────
+  quickCard: { marginHorizontal: 16, marginBottom: 4, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: 'rgba(0,230,118,0.2)', overflow: 'hidden' },
+  quickGradient: { padding: 16, gap: 12 },
+  credRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  credIconWrap: { width: 42, height: 42, borderRadius: RADIUS.md, backgroundColor: COLORS.accentDim, borderWidth: 1, borderColor: 'rgba(0,230,118,0.25)', alignItems: 'center', justifyContent: 'center' },
+  credId: { fontSize: 15, fontFamily: FONTS.bold, color: COLORS.text },
+  credSub: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted, marginTop: 2 },
+  credsActions: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.cardBorder, overflow: 'hidden' },
+  credsActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10 },
+  credsActionDivider: { width: 1, height: 20, backgroundColor: COLORS.cardBorder },
+  credsActionText: { fontSize: 12, fontFamily: FONTS.medium, color: COLORS.textSub },
+
+  // ─── Connected profile ──────────────────────────────────────────────────
   profileCard: { marginHorizontal: 16, marginBottom: 4, borderRadius: RADIUS.xl, borderWidth: 1, borderColor: 'rgba(0,230,118,0.2)', overflow: 'hidden' },
   profileGradient: { padding: 16, gap: 12 },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -334,10 +509,12 @@ const styles = StyleSheet.create({
   profileTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   tag: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: RADIUS.full, backgroundColor: COLORS.surface, borderWidth: 1, borderColor: COLORS.cardBorder, flexDirection: 'row', alignItems: 'center' },
   tagText: { fontSize: 10, fontFamily: FONTS.semibold, color: COLORS.textSub },
+  editCredsLink: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start' },
+  editCredsText: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted },
 
+  // ─── Shared ─────────────────────────────────────────────────────────────
   errorBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: COLORS.redDim, padding: 12, borderRadius: RADIUS.md },
   errorText: { fontSize: 12, fontFamily: FONTS.regular, color: COLORS.red, flex: 1, lineHeight: 18 },
-
   section: { marginBottom: 4 },
   sectionLabel: { fontSize: 10, fontFamily: FONTS.bold, color: COLORS.textMuted, letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   sectionCard: { marginHorizontal: 16, backgroundColor: COLORS.card, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: COLORS.cardBorder, overflow: 'hidden' },
@@ -346,25 +523,18 @@ const styles = StyleSheet.create({
   rowIcon: { width: 32, height: 32, borderRadius: RADIUS.sm, alignItems: 'center', justifyContent: 'center' },
   rowLabel: { fontSize: 14, fontFamily: FONTS.medium, color: COLORS.text },
   rowSublabel: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted, marginTop: 1 },
-
   footer: { textAlign: 'center', fontSize: 11, fontFamily: FONTS.regular, color: COLORS.textMuted, paddingVertical: 20, lineHeight: 18 },
+
+  // ─── Guide ──────────────────────────────────────────────────────────────
   guideHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, gap: 12 },
   backBtn: { width: 36, height: 36, borderRadius: RADIUS.md, backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.cardBorder },
   guideTitle: { fontSize: 18, fontFamily: FONTS.semibold, color: COLORS.text },
   guideIntro: { fontSize: 13, fontFamily: FONTS.regular, color: COLORS.textSub, lineHeight: 20, margin: 16, padding: 14, backgroundColor: COLORS.card, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.cardBorder },
   guideSectionTitle: { fontSize: 10, fontFamily: FONTS.bold, color: COLORS.textMuted, letterSpacing: 1.2, paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
   stratCard: { marginHorizontal: 16, marginBottom: 8, backgroundColor: COLORS.card, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.cardBorder, padding: 12, gap: 8 },
-  stratRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   stratNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: COLORS.accentDim, alignItems: 'center', justifyContent: 'center' },
   stratNumText: { fontSize: 11, fontFamily: FONTS.bold, color: COLORS.accent },
   stratName: { fontSize: 13, fontFamily: FONTS.semibold, color: COLORS.text },
   stratParams: { fontSize: 11, fontFamily: FONTS.regular, color: COLORS.accent, marginTop: 2 },
   stratDesc: { fontSize: 12, fontFamily: FONTS.regular, color: COLORS.textSub, lineHeight: 18, paddingTop: 4, borderTopWidth: 1, borderTopColor: COLORS.divider },
-  indGrid: { marginHorizontal: 16, backgroundColor: COLORS.card, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.cardBorder, padding: 12, gap: 8 },
-  indItem: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  indName: { fontSize: 13, fontFamily: FONTS.regular, color: COLORS.textSub },
-  hoursCard: { marginHorizontal: 16, backgroundColor: COLORS.card, borderRadius: RADIUS.md, borderWidth: 1, borderColor: COLORS.cardBorder, overflow: 'hidden' },
-  hoursRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 12 },
-  hoursSession: { fontSize: 13, fontFamily: FONTS.medium, color: COLORS.textSub },
-  hoursTime: { fontSize: 12, fontFamily: FONTS.regular, color: COLORS.accent },
 });

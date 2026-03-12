@@ -81,18 +81,20 @@ router.get("/config-status", (_req: Request, res: Response) => {
 });
 
 // ─── Auto-Login ────────────────────────────────────────────────────────────────
-// Uses env var credentials + auto-generated TOTP, then fetches real profile name.
-router.post("/auto-login", async (_req: Request, res: Response) => {
-  const clientCode = process.env.ANGELONE_CLIENT_CODE;
-  const pin = process.env.ANGELONE_PIN;
-  const apiKey = process.env.ANGELONE_API_KEY;
-  const totpSecret = process.env.ANGELONE_TOTP_SECRET;
+// Accepts optional body credentials (from mobile app) OR falls back to env vars.
+// Body params: { clientCode?, password?, apiKey?, totpSecret? }
+router.post("/auto-login", async (req: Request, res: Response) => {
+  const body = req.body || {};
+  const clientCode = body.clientCode || process.env.ANGELONE_CLIENT_CODE;
+  const pin = body.password || process.env.ANGELONE_PIN;
+  const apiKey = body.apiKey || process.env.ANGELONE_API_KEY;
+  const totpSecret = body.totpSecret || process.env.ANGELONE_TOTP_SECRET;
 
   if (!clientCode || !pin || !apiKey || !totpSecret) {
     return res.status(400).json({
       status: false,
       message:
-        "Missing env vars. Set ANGELONE_CLIENT_CODE, ANGELONE_PIN, ANGELONE_API_KEY, ANGELONE_TOTP_SECRET in Replit Secrets.",
+        "Missing credentials. Provide clientCode/password/apiKey/totpSecret in request body or set them in Replit Secrets.",
     });
   }
 

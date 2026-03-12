@@ -140,9 +140,11 @@ export interface FundsData {
 export const api = {
   configStatus: () => req<ConfigStatus>('/api/broker-proxy/config-status'),
 
-  autoLogin: () => req<{ status: boolean; message: string; data: Record<string, unknown> }>(
-    '/api/broker-proxy/auto-login', { method: 'POST' }
-  ),
+  autoLogin: (creds?: { clientCode: string; password: string; apiKey: string; totpSecret: string }) =>
+    req<{ status: boolean; message: string; data: Record<string, unknown> }>(
+      '/api/broker-proxy/auto-login',
+      { method: 'POST', body: creds ? JSON.stringify(creds) : undefined }
+    ),
 
   getHoldings: (jwtToken: string) =>
     req<{ status: boolean; data: Holding[] }>('/api/broker-proxy/rest/secure/angelbroking/portfolio/v1/getAllHolding', {
