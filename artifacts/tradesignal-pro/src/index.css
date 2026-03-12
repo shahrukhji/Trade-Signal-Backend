@@ -106,6 +106,6 @@
 
   /* Fix for android mobile layout on desktop */
   .mobile-container {
-    @apply w-full max-w-md mx-auto min-h-[100dvh] relative overflow-hidden bg-background shadow-2xl;
+    @apply w-full max-w-md mx-auto h-[100dvh] relative overflow-hidden bg-background shadow-2xl;
   }
 }

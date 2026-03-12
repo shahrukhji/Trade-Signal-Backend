@@ -49,7 +49,7 @@ export function Layout({ children }: { children: ReactNode }) {
       </div>
 
       {/* Main Content Area - Scrollable */}
-      <main className="flex-1 overflow-y-auto no-scrollbar pb-[72px]">
+      <main className="flex-1 overflow-y-auto no-scrollbar pb-[68px]">
         {children}
 
         {/* Watermark */}
@@ -58,9 +58,9 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </main>
 
-      {/* Fixed Bottom Nav — horizontally scrollable for 8 tabs */}
-      <nav className="absolute bottom-0 w-full h-[64px] glass-panel border-t border-white/10 z-50 overflow-x-auto no-scrollbar">
-        <div className="flex items-center h-full min-w-max px-1">
+      {/* Fixed Bottom Nav — all 8 tabs always visible */}
+      <nav className="absolute bottom-0 w-full h-[60px] glass-panel border-t border-white/10 z-50">
+        <div className="flex items-center h-full w-full">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = location.startsWith(tab.id);
@@ -68,17 +68,17 @@ export function Layout({ children }: { children: ReactNode }) {
               <Link
                 key={tab.id}
                 href={tab.id}
-                className={`relative flex flex-col items-center justify-center w-[11.5vw] min-w-[58px] h-full transition-all duration-200 flex-shrink-0 ${
+                className={`relative flex flex-col items-center justify-center flex-1 h-full transition-all duration-200 ${
                   isActive ? 'text-accent' : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 <Icon
-                  size={20}
+                  size={18}
                   className={isActive ? 'mb-0.5 drop-shadow-[0_0_8px_rgba(0,191,255,0.5)]' : 'mb-0.5'}
                 />
-                <span className="text-[9px] font-medium leading-none">{tab.label}</span>
+                <span className="text-[8px] font-medium leading-none">{tab.label}</span>
                 {isActive && (
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-[2px] bg-accent rounded-b-md shadow-[0_2px_8px_rgba(0,191,255,0.8)]" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-5 h-[2px] bg-accent rounded-b-md shadow-[0_2px_8px_rgba(0,191,255,0.8)]" />
                 )}
               </Link>
             );
