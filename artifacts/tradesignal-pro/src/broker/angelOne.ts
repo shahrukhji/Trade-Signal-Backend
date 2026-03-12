@@ -237,7 +237,10 @@ export const STOCK_MASTER_LIST: SearchResult[] = [
 // ═══════════════════════════════════════
 
 class AngelOneService {
-  private baseUrl = 'https://apiconnect.angelone.in';
+  // All requests go through the backend proxy to avoid browser CORS restrictions.
+  // The Vite dev server proxies /api/* → http://localhost:8080/api/*
+  // The Express server then forwards /api/broker-proxy/* → https://apiconnect.angelone.in/*
+  private baseUrl = '/api/broker-proxy';
   private session: AngelOneSession | null = null;
   private apiKey: string = '';
   private isDemo: boolean = false;

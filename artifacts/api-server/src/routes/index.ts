@@ -10,10 +10,12 @@ import symbolsRouter from "./symbols.js";
 import liveRouter from "./live.js";
 import aiRouter from "./ai.js";
 import paperRouter from "./paper.js";
+import brokerProxyRouter from "./broker-proxy.js";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use("/broker-proxy", brokerProxyRouter);
 router.use("/auth", authRouter);
 router.use("/market", marketRouter);
 router.use("/orders", ordersRouter);
