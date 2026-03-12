@@ -1,14 +1,53 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '@/store/use-store';
-import { angelOne } from '@/broker/angelOne';
+import { angelOne, type WalletBalance } from '@/broker/angelOne';
 import {
   Shield, BrainCircuit, Sliders, BellRing, Link as LinkIcon,
   CheckCircle2, AlertCircle, LogOut, User, Loader2, Eye, EyeOff,
-  Wifi, WifiOff, Key, Building2,
+  Wifi, WifiOff, Key, Building2, RefreshCw, Clock, TrendingUp,
+  DollarSign, Activity,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 
+// ─── Market Status Helper ────────────────────────────────────────────────────
+function getMarketStatus(): { open: boolean; label: string; next: string } {
+  const now = new Date();
+  // Convert to IST (UTC+5:30)
+  const ist = new Date(now.getTime() + (5.5 * 60 * 60 * 1000));
+  const day = ist.getUTCDay(); // 0=Sun, 6=Sat
+  const h = ist.getUTCHours();
+  const m = ist.getUTCMinutes();
+  const mins = h * 60 + m;
+
+  const open = 9 * 60 + 15;   // 9:15 AM
+  const close = 15 * 60 + 30; // 3:30 PM
+
+  const isWeekday = day >= 1 && day <= 5;
+  const isOpen = isWeekday && mins >= open && mins < close;
+
+  let next = '';
+  if (!isOpen) {
+    if (!isWeekday || mins >= close) {
+      next = 'Opens Mon 9:15 AM IST';
+      if (isWeekday && mins < open) next = 'Opens at 9:15 AM IST';
+      if (isWeekday && mins >= close) next = 'Opens tomorrow 9:15 AM IST';
+    }
+  }
+
+  return {
+    open: isOpen,
+    label: isOpen ? 'MARKET OPEN' : 'MARKET CLOSED',
+    next,
+  };
+}
+
+const API_ENDPOINT = 'https://apiconnect.angelone.in';
+
+const fmtINR = (n: number) =>
+  `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n)}`;
+
+// ─── Component ───────────────────────────────────────────────────────────────
 export function Settings() {
   const {
     paperMode, setPaperMode,
@@ -20,7 +59,7 @@ export function Settings() {
 
   const [activeTab, setActiveTab] = useState('broker');
 
-  // Broker login form
+  // Broker form
   const [clientId, setClientId] = useState('');
   const [password, setPassword] = useState('');
   const [apiKey, setApiKey] = useState('');
@@ -30,49 +69,77 @@ export function Settings() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
 
+  // Post-login data
+  const [wallet, setWallet] = useState<WalletBalance | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [marketStatus, setMarketStatus] = useState(getMarketStatus());
+
   // AI form
   const [aiApiKey, setAiApiKey] = useState(geminiConfig.apiKey || '');
   const [aiProvider, setAiProvider] = useState('Google Gemini');
   const [showAiKey, setShowAiKey] = useState(false);
   const [aiTesting, setAiTesting] = useState(false);
 
-  // Restore session into the angelOne service on mount
+  const isConnected = !!brokerSession && !brokerIsDemo;
+
+  // Restore session on mount
   useEffect(() => {
     if (brokerSession && brokerApiKey) {
       angelOne.restoreSession(brokerSession, brokerIsDemo, brokerApiKey);
     }
+    if (brokerProfile) setClientId(brokerProfile.clientId);
   }, []);
 
-  // Pre-fill clientId if already connected
+  // Refresh market status every 30s
   useEffect(() => {
-    if (brokerProfile) {
-      setClientId(brokerProfile.clientId);
-    }
-  }, [brokerProfile]);
+    const t = setInterval(() => setMarketStatus(getMarketStatus()), 30000);
+    return () => clearInterval(t);
+  }, []);
 
-  const isConnected = !!brokerSession;
+  // Fetch wallet when connected
+  const fetchWallet = useCallback(async () => {
+    if (!isConnected) return;
+    setWalletLoading(true);
+    try {
+      const bal = await angelOne.getWalletBalance();
+      setWallet(bal);
+    } catch (_) {}
+    setWalletLoading(false);
+  }, [isConnected]);
+
+  useEffect(() => {
+    if (isConnected) fetchWallet();
+  }, [isConnected]);
 
   const handleConnect = async () => {
     if (!clientId.trim()) { setLoginError('Client ID is required'); return; }
     if (!password.trim()) { setLoginError('Password / PIN is required'); return; }
-    if (!apiKey.trim()) { setLoginError('API Key is required'); return; }
+    if (!apiKey.trim()) { setLoginError('SmartAPI Key is required'); return; }
     if (!totp.trim()) { setLoginError('TOTP is required'); return; }
+    if (totp.trim().length < 6 || totp.trim().length > 64) {
+      setLoginError('TOTP must be between 6 and 64 characters');
+      return;
+    }
 
     setLoginLoading(true);
     setLoginError('');
 
-    const result = await angelOne.login({ clientId, password, apiKey, totp });
+    const result = await angelOne.login(
+      { clientId: clientId.trim().toUpperCase(), password: password.trim(), apiKey: apiKey.trim(), totp: totp.trim() },
+      { strict: true }
+    );
 
     if (result.success && result.session && result.profile) {
-      setBrokerSession(result.session, result.profile, angelOne.isDemoMode(), apiKey);
-      toast.success(
-        angelOne.isDemoMode()
-          ? 'Connected in Demo Mode (API unreachable)'
-          : `Connected as ${result.profile.clientName}`
-      );
+      setBrokerSession(result.session, result.profile, false, apiKey.trim());
+      toast.success(`Connected as ${result.profile.clientName}`);
       setTotp('');
+      // Fetch wallet after connecting
+      setTimeout(async () => {
+        const bal = await angelOne.getWalletBalance();
+        setWallet(bal);
+      }, 800);
     } else {
-      setLoginError(result.error || 'Login failed. Please try again.');
+      setLoginError(result.error || 'Login failed. Verify your credentials and try again.');
     }
 
     setLoginLoading(false);
@@ -81,6 +148,7 @@ export function Settings() {
   const handleDisconnect = async () => {
     await angelOne.logout();
     clearBrokerSession();
+    setWallet(null);
     toast.info('Disconnected from Angel One');
   };
 
@@ -105,29 +173,37 @@ export function Settings() {
       <h1 className="text-2xl font-bold text-foreground mb-5">Settings</h1>
 
       {/* Status Bar */}
-      <div className="glass-panel border border-border rounded-2xl p-4 mb-5 grid grid-cols-2 gap-3">
-        <div className="bg-input rounded-xl p-3 border border-white/5">
-          <p className="text-[10px] text-muted-foreground uppercase mb-1.5">Broker</p>
+      <div className="glass-panel border border-border rounded-2xl p-3 mb-5 flex gap-2">
+        {/* Broker status */}
+        <div className={`flex-1 rounded-xl p-3 border flex flex-col gap-1 ${isConnected ? 'bg-primary/5 border-primary/20' : 'bg-input border-white/5'}`}>
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Broker</p>
           {isConnected ? (
-            <p className="font-bold text-sm text-primary flex items-center gap-1.5">
-              <Wifi size={13} />
-              {brokerIsDemo ? 'Demo Mode' : 'Connected'}
+            <p className="font-bold text-xs text-primary flex items-center gap-1">
+              <Wifi size={11} /> Connected
             </p>
           ) : (
-            <p className="font-bold text-sm text-muted-foreground flex items-center gap-1.5">
-              <WifiOff size={13} /> Disconnected
+            <p className="font-bold text-xs text-muted-foreground flex items-center gap-1">
+              <WifiOff size={11} /> Disconnected
             </p>
           )}
         </div>
-        <div className="bg-input rounded-xl p-3 border border-white/5">
-          <p className="text-[10px] text-muted-foreground uppercase mb-1.5">AI Engine</p>
+        {/* Market status */}
+        <div className={`flex-1 rounded-xl p-3 border flex flex-col gap-1 ${marketStatus.open ? 'bg-primary/5 border-primary/20' : 'bg-input border-white/5'}`}>
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Market</p>
+          <p className={`font-bold text-xs flex items-center gap-1 ${marketStatus.open ? 'text-primary' : 'text-yellow-400'}`}>
+            <Activity size={11} /> {marketStatus.open ? 'OPEN' : 'CLOSED'}
+          </p>
+        </div>
+        {/* AI status */}
+        <div className={`flex-1 rounded-xl p-3 border flex flex-col gap-1 ${geminiConfig.status === 'ACTIVE' ? 'bg-accent/5 border-accent/20' : 'bg-input border-white/5'}`}>
+          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">AI</p>
           {geminiConfig.status === 'ACTIVE' ? (
-            <p className="font-bold text-sm text-accent flex items-center gap-1.5">
-              <CheckCircle2 size={13} /> Active
+            <p className="font-bold text-xs text-accent flex items-center gap-1">
+              <CheckCircle2 size={11} /> Active
             </p>
           ) : (
-            <p className="font-bold text-sm text-muted-foreground flex items-center gap-1.5">
-              <AlertCircle size={13} /> Not Set
+            <p className="font-bold text-xs text-muted-foreground flex items-center gap-1">
+              <AlertCircle size={11} /> Not Set
             </p>
           )}
         </div>
@@ -161,94 +237,194 @@ export function Settings() {
           transition={{ duration: 0.18 }}
           className="space-y-4"
         >
+
           {/* ═══════════════ BROKER TAB ═══════════════ */}
           {activeTab === 'broker' && (
             <>
-              {/* Connected Profile Card */}
+              {/* API Endpoint Info */}
+              <div className="bg-input border border-white/5 rounded-xl px-4 py-2.5 flex items-center gap-2">
+                <Building2 size={13} className="text-accent flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[9px] text-muted-foreground uppercase tracking-wide">API Endpoint</p>
+                  <p className="text-[11px] font-mono text-foreground truncate">{API_ENDPOINT}</p>
+                </div>
+                <div className={`w-2 h-2 rounded-full flex-shrink-0 ${isConnected ? 'bg-primary animate-pulse' : 'bg-muted-foreground/40'}`} />
+              </div>
+
+              {/* ── CONNECTED STATE ── */}
               {isConnected && brokerProfile ? (
-                <div className="bg-gradient-to-br from-primary/10 to-accent/5 border border-primary/30 rounded-2xl p-4">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-12 h-12 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center">
-                      <span className="text-primary font-bold text-lg">{brokerProfile.avatarInitials}</span>
+                <div className="space-y-3">
+                  {/* Profile Card */}
+                  <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent border border-primary/30 rounded-2xl p-4">
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="w-14 h-14 rounded-2xl bg-primary/20 border-2 border-primary/40 flex items-center justify-center flex-shrink-0">
+                        <span className="text-primary font-black text-xl">{brokerProfile.avatarInitials}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-[9px] bg-primary/20 text-primary px-2 py-0.5 rounded-full font-bold uppercase tracking-wide flex items-center gap-1">
+                            <CheckCircle2 size={9} /> Live Connected
+                          </span>
+                        </div>
+                        <h3 className="font-black text-lg text-foreground leading-tight truncate">
+                          {brokerProfile.clientName}
+                        </h3>
+                        <p className="text-xs text-muted-foreground font-mono">{brokerProfile.clientId}</p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-foreground truncate">{brokerProfile.clientName}</h3>
-                      <p className="text-xs text-muted-foreground font-mono">{brokerProfile.clientId}</p>
+                  </div>
+
+                  {/* Market Status Card */}
+                  <div className={`rounded-2xl p-3.5 border flex items-center justify-between ${marketStatus.open ? 'bg-primary/10 border-primary/30' : 'bg-yellow-500/10 border-yellow-500/30'}`}>
+                    <div className="flex items-center gap-2">
+                      <div className={`w-2.5 h-2.5 rounded-full ${marketStatus.open ? 'bg-primary animate-pulse' : 'bg-yellow-400'}`} />
+                      <div>
+                        <p className={`font-black text-sm ${marketStatus.open ? 'text-primary' : 'text-yellow-400'}`}>
+                          {marketStatus.label}
+                        </p>
+                        {!marketStatus.open && marketStatus.next && (
+                          <p className="text-[10px] text-muted-foreground flex items-center gap-1">
+                            <Clock size={9} /> {marketStatus.next}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    {brokerIsDemo && (
-                      <span className="text-[9px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full font-bold uppercase">Demo</span>
+                    <p className="text-[10px] text-muted-foreground">NSE / BSE</p>
+                  </div>
+
+                  {/* Wallet Balance */}
+                  <div className="glass-panel border border-border rounded-2xl p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <DollarSign size={14} className="text-accent" />
+                        <h3 className="text-sm font-bold text-foreground">Wallet Balance</h3>
+                      </div>
+                      <button
+                        onClick={fetchWallet}
+                        disabled={walletLoading}
+                        className="p-1.5 rounded-lg bg-input border border-white/5 active:scale-90 transition-transform"
+                      >
+                        <RefreshCw size={12} className={`text-muted-foreground ${walletLoading ? 'animate-spin' : ''}`} />
+                      </button>
+                    </div>
+                    {wallet ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-primary/5 border border-primary/20 rounded-xl p-3">
+                          <p className="text-[9px] text-muted-foreground uppercase mb-1">Available Cash</p>
+                          <p className="font-black text-base text-primary">{fmtINR(wallet.availableCash)}</p>
+                        </div>
+                        <div className="bg-input border border-white/5 rounded-xl p-3">
+                          <p className="text-[9px] text-muted-foreground uppercase mb-1">Used Margin</p>
+                          <p className="font-black text-base text-foreground">{fmtINR(wallet.usedMargin)}</p>
+                        </div>
+                        <div className="bg-input border border-white/5 rounded-xl p-3">
+                          <p className="text-[9px] text-muted-foreground uppercase mb-1">Total Margin</p>
+                          <p className="font-bold text-sm text-foreground">{fmtINR(wallet.totalMargin)}</p>
+                        </div>
+                        <div className={`rounded-xl p-3 border ${wallet.todayPnL >= 0 ? 'bg-primary/5 border-primary/20' : 'bg-destructive/5 border-destructive/20'}`}>
+                          <p className="text-[9px] text-muted-foreground uppercase mb-1">Today P&L</p>
+                          <p className={`font-black text-base ${wallet.todayPnL >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                            {wallet.todayPnL >= 0 ? '+' : ''}{fmtINR(wallet.todayPnL)}
+                          </p>
+                        </div>
+                        {wallet.collateral > 0 && (
+                          <div className="bg-input border border-white/5 rounded-xl p-3 col-span-2">
+                            <p className="text-[9px] text-muted-foreground uppercase mb-1">Collateral</p>
+                            <p className="font-bold text-sm text-foreground">{fmtINR(wallet.collateral)}</p>
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-4">
+                        <Loader2 size={20} className="animate-spin text-accent mx-auto mb-2" />
+                        <p className="text-xs text-muted-foreground">Loading balance...</p>
+                      </div>
                     )}
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 mb-4">
-                    <div className="bg-card/50 rounded-xl p-2.5">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Broker</p>
-                      <p className="text-xs font-bold text-foreground">{brokerProfile.broker}</p>
-                    </div>
-                    <div className="bg-card/50 rounded-xl p-2.5">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Exchanges</p>
-                      <p className="text-xs font-bold text-foreground">{brokerProfile.exchanges.join(', ')}</p>
-                    </div>
-                    <div className="bg-card/50 rounded-xl p-2.5">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Products</p>
-                      <p className="text-xs font-bold text-foreground truncate">{brokerProfile.products.slice(0, 2).join(', ')}</p>
-                    </div>
-                    <div className="bg-card/50 rounded-xl p-2.5">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Last Login</p>
-                      <p className="text-xs font-bold text-foreground">
-                        {brokerProfile.lastLoginTime
-                          ? new Date(brokerProfile.lastLoginTime).toLocaleDateString('en-IN')
-                          : 'Today'}
-                      </p>
+                  {/* Account Info Grid */}
+                  <div className="glass-panel border border-border rounded-2xl p-4">
+                    <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <User size={12} /> Account Details
+                    </h3>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-input rounded-xl p-2.5 border border-white/5">
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Broker</p>
+                        <p className="text-xs font-bold text-foreground">{brokerProfile.broker}</p>
+                      </div>
+                      <div className="bg-input rounded-xl p-2.5 border border-white/5">
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Email</p>
+                        <p className="text-xs font-bold text-foreground truncate">{brokerProfile.email || '—'}</p>
+                      </div>
+                      <div className="bg-input rounded-xl p-2.5 border border-white/5">
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Exchanges</p>
+                        <p className="text-xs font-bold text-foreground">{brokerProfile.exchanges.join(' · ')}</p>
+                      </div>
+                      <div className="bg-input rounded-xl p-2.5 border border-white/5">
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Products</p>
+                        <p className="text-xs font-bold text-foreground truncate">{brokerProfile.products.join(', ')}</p>
+                      </div>
+                      <div className="bg-input rounded-xl p-2.5 border border-white/5 col-span-2">
+                        <p className="text-[9px] text-muted-foreground mb-0.5">Last Login</p>
+                        <p className="text-xs font-bold text-foreground">
+                          {brokerProfile.lastLoginTime
+                            ? new Date(brokerProfile.lastLoginTime).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })
+                            : 'Today'}
+                        </p>
+                      </div>
                     </div>
                   </div>
 
+                  {/* Disconnect */}
                   <button
                     onClick={handleDisconnect}
-                    className="w-full h-11 bg-destructive/10 border border-destructive/30 text-destructive font-bold rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                    className="w-full h-12 bg-destructive/10 border border-destructive/30 text-destructive font-bold rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
                   >
                     <LogOut size={15} />
-                    Disconnect Broker
+                    Disconnect from Angel One
                   </button>
                 </div>
               ) : (
-                /* Login Form */
+
+                /* ── LOGIN FORM ── */
                 <div>
                   <div className="flex items-center gap-2 mb-4">
-                    <Building2 size={16} className="text-accent" />
-                    <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Angel One SmartAPI</h2>
+                    <TrendingUp size={16} className="text-accent" />
+                    <h2 className="text-sm font-bold text-foreground uppercase tracking-wider">Connect Angel One SmartAPI</h2>
                   </div>
 
                   <div className="space-y-3">
                     {/* Client ID */}
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        Client Code <span className="text-destructive">*</span>
+                        Client ID <span className="text-destructive">*</span>
                       </label>
                       <div className="relative">
                         <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
                           type="text"
                           value={clientId}
-                          onChange={(e) => setClientId(e.target.value.toUpperCase())}
-                          placeholder="e.g. A123456"
+                          onChange={(e) => { setClientId(e.target.value.toUpperCase()); setLoginError(''); }}
+                          placeholder="e.g. A1234567"
                           className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
+                          autoComplete="off"
+                          autoCapitalize="characters"
                         />
                       </div>
                     </div>
 
-                    {/* Password / PIN */}
+                    {/* PIN / Password */}
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        Password / PIN <span className="text-destructive">*</span>
+                        PIN / Password <span className="text-destructive">*</span>
                       </label>
                       <div className="relative">
                         <Shield size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
                           type={showPassword ? 'text' : 'password'}
                           value={password}
-                          onChange={(e) => setPassword(e.target.value)}
-                          placeholder="Login password"
+                          onChange={(e) => { setPassword(e.target.value); setLoginError(''); }}
+                          placeholder="Your Angel One login PIN"
                           className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-10 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
                         />
                         <button
@@ -260,7 +436,7 @@ export function Settings() {
                       </div>
                     </div>
 
-                    {/* API Key */}
+                    {/* SmartAPI Key */}
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
                         SmartAPI Key <span className="text-destructive">*</span>
@@ -270,9 +446,10 @@ export function Settings() {
                         <input
                           type={showApiKey ? 'text' : 'password'}
                           value={apiKey}
-                          onChange={(e) => setApiKey(e.target.value)}
-                          placeholder="From Angel One developer portal"
+                          onChange={(e) => { setApiKey(e.target.value); setLoginError(''); }}
+                          placeholder="From smartapi.angelone.in"
                           className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-10 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
+                          autoComplete="off"
                         />
                         <button
                           onClick={() => setShowApiKey(!showApiKey)}
@@ -281,46 +458,63 @@ export function Settings() {
                           {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
                         </button>
                       </div>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Create your API key at <span className="text-accent">smartapi.angelone.in</span>
+                      </p>
                     </div>
 
                     {/* TOTP */}
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        TOTP <span className="text-destructive">*</span>
+                        TOTP <span className="text-muted-foreground font-normal">(6–64 characters)</span> <span className="text-destructive">*</span>
                       </label>
-                      <input
-                        type="text"
-                        value={totp}
-                        onChange={(e) => setTotp(e.target.value)}
-                        placeholder="From Angel One SmartAPI website"
-                        className="w-full bg-input border border-border rounded-xl h-12 px-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
-                      />
+                      <div className="relative">
+                        <CheckCircle2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                        <input
+                          type="text"
+                          value={totp}
+                          onChange={(e) => { setTotp(e.target.value); setLoginError(''); }}
+                          placeholder="Paste TOTP from Angel One SmartAPI portal"
+                          maxLength={64}
+                          className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
+                          autoComplete="one-time-code"
+                        />
+                      </div>
                       <p className="text-[10px] text-muted-foreground mt-1">
-                        Copy the TOTP generated on your Angel One SmartAPI portal
+                        Copy the time-based token from your Angel One SmartAPI portal
                       </p>
+                      {totp.length > 0 && (
+                        <p className={`text-[10px] mt-0.5 ${totp.length >= 6 && totp.length <= 64 ? 'text-primary' : 'text-destructive'}`}>
+                          {totp.length} characters {totp.length < 6 ? '(need at least 6)' : totp.length > 64 ? '(max 64)' : '✓'}
+                        </p>
+                      )}
                     </div>
 
                     {/* Error */}
-                    {loginError && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-destructive/10 border border-destructive/30 rounded-xl p-3 flex items-start gap-2"
-                      >
-                        <AlertCircle size={14} className="text-destructive mt-0.5 flex-shrink-0" />
-                        <p className="text-xs text-destructive">{loginError}</p>
-                      </motion.div>
-                    )}
+                    <AnimatePresence>
+                      {loginError && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="bg-destructive/10 border border-destructive/30 rounded-xl p-3 flex items-start gap-2"
+                        >
+                          <AlertCircle size={14} className="text-destructive mt-0.5 flex-shrink-0" />
+                          <p className="text-xs text-destructive">{loginError}</p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
+                    {/* Connect Button */}
                     <button
                       onClick={handleConnect}
                       disabled={loginLoading}
-                      className="w-full h-12 bg-accent text-background font-bold rounded-xl shadow-[0_0_20px_rgba(0,191,255,0.3)] flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-60"
+                      className="w-full h-12 bg-accent text-background font-black rounded-xl shadow-[0_0_24px_rgba(0,191,255,0.4)] flex items-center justify-center gap-2 active:scale-95 transition-all disabled:opacity-60"
                     >
                       {loginLoading ? (
                         <>
                           <Loader2 size={16} className="animate-spin" />
-                          Connecting...
+                          Connecting to Angel One...
                         </>
                       ) : (
                         <>
@@ -330,9 +524,26 @@ export function Settings() {
                       )}
                     </button>
 
-                    <p className="text-[10px] text-muted-foreground text-center">
-                      Credentials are stored only on your device. Never shared externally.
-                    </p>
+                    {/* Notice */}
+                    <div className="bg-input border border-white/5 rounded-xl p-3">
+                      <p className="text-[10px] text-muted-foreground text-center leading-relaxed">
+                        🔒 Genuine credentials required — no demo mode.<br />
+                        Credentials are stored locally on your device only.
+                      </p>
+                    </div>
+
+                    {/* Market Status (pre-login too) */}
+                    <div className={`rounded-xl p-3 border flex items-center justify-between ${marketStatus.open ? 'bg-primary/5 border-primary/20' : 'bg-yellow-500/5 border-yellow-500/20'}`}>
+                      <div className="flex items-center gap-2">
+                        <div className={`w-2 h-2 rounded-full ${marketStatus.open ? 'bg-primary animate-pulse' : 'bg-yellow-400'}`} />
+                        <p className={`text-xs font-bold ${marketStatus.open ? 'text-primary' : 'text-yellow-400'}`}>
+                          {marketStatus.label}
+                        </p>
+                      </div>
+                      {!marketStatus.open && marketStatus.next && (
+                        <p className="text-[10px] text-muted-foreground">{marketStatus.next}</p>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -467,22 +678,19 @@ export function Settings() {
 
           {/* ═══════════════ ALERTS TAB ═══════════════ */}
           {activeTab === 'alerts' && (
-            <div className="p-4 bg-input rounded-xl border border-white/5 text-center">
-              <AlertCircle className="mx-auto text-accent mb-2" size={32} />
-              <h3 className="font-bold text-foreground">Price Alerts</h3>
-              <p className="text-xs text-muted-foreground mt-1">
-                Notification permissions required to enable price alerts and AI signal triggers.
+            <div className="p-6 bg-input rounded-xl border border-white/5 text-center">
+              <BellRing className="mx-auto text-accent mb-3" size={36} />
+              <h3 className="font-bold text-foreground text-base">Price Alerts</h3>
+              <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                Enable notifications to receive real-time AI signal triggers and price movement alerts.
               </p>
-              <button className="mt-4 px-6 py-2 bg-card border border-border rounded-lg text-sm font-bold active:scale-95 transition-transform">
-                Request Permission
+              <button className="mt-4 px-8 py-2.5 bg-card border border-border rounded-xl text-sm font-bold active:scale-95 transition-transform">
+                Enable Notifications
               </button>
             </div>
           )}
         </motion.div>
       </AnimatePresence>
-
-      {/* Watermark */}
-      <p className="text-center text-[10px] text-muted-foreground/40 mt-8">Made with ❤️ by Shahrukh</p>
     </div>
   );
 }

@@ -246,7 +246,10 @@ class AngelOneService {
   // AUTHENTICATION
   // ═══════════════════════════════════════
 
-  async login(credentials: AngelOneCredentials): Promise<{
+  async login(
+    credentials: AngelOneCredentials,
+    options: { strict?: boolean } = {}
+  ): Promise<{
     success: boolean;
     session?: AngelOneSession;
     profile?: AccountProfile;
@@ -328,6 +331,14 @@ class AngelOneService {
         return { success: false, error: `Login failed: ${errorData.message || response.status}` };
       }
     } catch (networkError: any) {
+      // Strict mode: no demo fallback — report the actual network error
+      if (options.strict) {
+        const msg = networkError?.name === 'TimeoutError' || networkError?.name === 'AbortError'
+          ? 'Connection timed out. Check your internet connection and API key.'
+          : 'Unable to reach Angel One servers. Check your internet and try again.';
+        return { success: false, error: msg };
+      }
+
       // Network unreachable → fall back to demo mode
       console.warn('Angel One API unreachable, switching to demo mode');
       this.isDemo = true;
