@@ -1,22 +1,34 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: TradeSignal Pro API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Broker authentication
+  - name: market
+    description: Market data
+  - name: orders
+    description: Order management
+  - name: portfolio
+    description: Portfolio management
+  - name: signals
+    description: Trading signals
+  - name: symbols
+    description: Symbol search
+  - name: paper
+    description: Paper trading
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +36,273 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: authLogin
+      tags: [auth]
+      summary: Login to broker
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+
+  /auth/status:
+    get:
+      operationId: authStatus
+      tags: [auth]
+      summary: Get auth status
+      responses:
+        "200":
+          description: Auth status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
+  /market/status:
+    get:
+      operationId: marketStatus
+      tags: [market]
+      summary: Get market status
+      responses:
+        "200":
+          description: Market status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketStatus"
+
+  /market/quote:
+    post:
+      operationId: marketQuote
+      tags: [market]
+      summary: Get live quotes
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QuoteRequest"
+      responses:
+        "200":
+          description: Quotes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /market/candles:
+    post:
+      operationId: marketCandles
+      tags: [market]
+      summary: Get historical candles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CandleRequest"
+      responses:
+        "200":
+          description: Candles
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CandleResponse"
+
+  /market/indices:
+    get:
+      operationId: marketIndices
+      tags: [market]
+      summary: Get market indices
+      responses:
+        "200":
+          description: Indices data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /signals/generate:
+    post:
+      operationId: signalsGenerate
+      tags: [signals]
+      summary: Generate trading signal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignalRequest"
+      responses:
+        "200":
+          description: Signal result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SignalResponse"
+
+  /orders/place:
+    post:
+      operationId: ordersPlace
+      tags: [orders]
+      summary: Place order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRequest"
+      responses:
+        "200":
+          description: Order result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /orders/book:
+    get:
+      operationId: ordersBook
+      tags: [orders]
+      summary: Get order book
+      responses:
+        "200":
+          description: Order book
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /portfolio/holdings:
+    get:
+      operationId: portfolioHoldings
+      tags: [portfolio]
+      summary: Get holdings
+      responses:
+        "200":
+          description: Holdings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /portfolio/positions:
+    get:
+      operationId: portfolioPositions
+      tags: [portfolio]
+      summary: Get positions
+      responses:
+        "200":
+          description: Positions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /portfolio/funds:
+    get:
+      operationId: portfolioFunds
+      tags: [portfolio]
+      summary: Get funds
+      responses:
+        "200":
+          description: Funds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /symbols/search:
+    get:
+      operationId: symbolsSearch
+      tags: [symbols]
+      summary: Search symbols
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: exchange
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Symbol search results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /symbols/nifty50:
+    get:
+      operationId: symbolsNifty50
+      tags: [symbols]
+      summary: Get NIFTY50 symbols
+      responses:
+        "200":
+          description: NIFTY50 list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /paper/portfolio:
+    get:
+      operationId: paperPortfolio
+      tags: [paper]
+      summary: Get paper portfolio
+      responses:
+        "200":
+          description: Paper portfolio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /paper/order:
+    post:
+      operationId: paperOrder
+      tags: [paper]
+      summary: Place paper order
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrderRequest"
+      responses:
+        "200":
+          description: Paper order result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
+  /ai/analyze:
+    post:
+      operationId: aiAnalyze
+      tags: [signals]
+      summary: Analyze with AI
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AIAnalyzeRequest"
+      responses:
+        "200":
+          description: AI analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +313,237 @@ components:
       required:
         - status
 
+    ApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+      required:
+        - success
+
+    LoginRequest:
+      type: object
+      properties:
+        broker:
+          type: string
+        accessToken:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        broker:
+          type: string
+        connected:
+          type: boolean
+        expiresAt:
+          type: number
+        error:
+          type: string
+      required:
+        - success
+
+    AuthStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        broker:
+          type: string
+        expiry:
+          type: string
+        profile:
+          type: object
+          additionalProperties: true
+
+    MarketStatus:
+      type: object
+      properties:
+        isOpen:
+          type: boolean
+        session:
+          type: string
+          enum: [OPEN, PRE, CLOSED]
+        nextEvent:
+          type: string
+      required:
+        - isOpen
+        - session
+        - nextEvent
+
+    QuoteRequest:
+      type: object
+      properties:
+        symbols:
+          type: array
+          items:
+            type: string
+        exchange:
+          type: string
+        mode:
+          type: string
+      required:
+        - symbols
+
+    CandleRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+        symboltoken:
+          type: string
+        exchange:
+          type: string
+        interval:
+          type: string
+        fromdate:
+          type: string
+        todate:
+          type: string
+      required:
+        - interval
+        - fromdate
+        - todate
+
+    Candle:
+      type: object
+      properties:
+        time:
+          type: number
+        open:
+          type: number
+        high:
+          type: number
+        low:
+          type: number
+        close:
+          type: number
+        volume:
+          type: number
+      required:
+        - time
+        - open
+        - high
+        - low
+        - close
+        - volume
+
+    CandleResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        candles:
+          type: array
+          items:
+            $ref: "#/components/schemas/Candle"
+      required:
+        - success
+
+    SignalRequest:
+      type: object
+      properties:
+        symbol:
+          type: string
+        symboltoken:
+          type: string
+        exchange:
+          type: string
+        interval:
+          type: string
+      required:
+        - symbol
+
+    SignalResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        signal:
+          type: object
+          properties:
+            symbol:
+              type: string
+            signal:
+              type: string
+            score:
+              type: number
+            confidence:
+              type: number
+            entry:
+              type: number
+            target1:
+              type: number
+            target2:
+              type: number
+            target3:
+              type: number
+            stopLoss:
+              type: number
+            riskReward:
+              type: number
+            reasons:
+              type: array
+              items:
+                type: string
+
+    OrderRequest:
+      type: object
+      properties:
+        tradingsymbol:
+          type: string
+        symboltoken:
+          type: string
+        transactiontype:
+          type: string
+        ordertype:
+          type: string
+        producttype:
+          type: string
+        exchange:
+          type: string
+        quantity:
+          type: number
+        price:
+          type: number
+        variety:
+          type: string
+      required:
+        - tradingsymbol
+        - transactiontype
+        - quantity
+
+    AIAnalyzeRequest:
+      type: object
+      properties:
+        provider:
+          type: string
+        model:
+          type: string
+        apiKey:
+          type: string
+        stockName:
+          type: string
+        timeframe:
+          type: string
+        candles:
+          type: array
+          items:
+            $ref: "#/components/schemas/Candle"
+        indicators:
+          type: object
+          additionalProperties: true
+        patterns:
+          type: object
+          additionalProperties: true
+      required:
+        - provider
+        - apiKey
+        - candles

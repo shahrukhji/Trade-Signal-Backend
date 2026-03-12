@@ -1,0 +1,3070 @@
+Build the COMPLETE core stock analysis engine for TradeSignal Pro. This is the BRAIN of the entire application — it reads live candlestick data, calculates 25+ technical indicators, detects 22 candlestick patterns, identifies 12 chart patterns, scores everything using a multi-indicator confluence system, and outputs precise BUY/SELL/HOLD signals with detailed reasoning, confidence levels, entry prices, targets, and stop losses.
+
+Every single function must have COMPLETE mathematical implementation. No stubs, no placeholders, no "TODO". This must be production-grade trading logic.
+
+Create these files:
+
+═══════════════════════════════════════════════════════════════
+FILE 1: src/engine/indicators.ts
+PURE MATHEMATICAL INDICATOR CALCULATIONS
+═══════════════════════════════════════════════════════════════
+
+```typescript
+// ═══════════════════════════════════════════════════════════
+// TradeSignal Pro — Technical Indicator Mathematics Engine
+// Every indicator calculated from raw OHLCV data
+// Made with ❤️ by Shahrukh
+// ═══════════════════════════════════════════════════════════
+
+export interface OHLCV {
+  time: number;      // Unix timestamp in seconds
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface IndicatorResult {
+  value: number;
+  values?: number[];    // Full series
+  signal?: string;      // BUY/SELL/NEUTRAL
+  interpretation?: string;
+}
+
+// ═══════════════════════════════════════
+// 1. SIMPLE MOVING AVERAGE (SMA)
+// ═══════════════════════════════════════
+// Formula: SMA = (P1 + P2 + ... + Pn) / n
+// Where P = closing price, n = period
+//
+// Usage: Trend direction. Price above SMA = bullish.
+// Common periods: 20 (short), 50 (medium), 200 (long-term)
+
+export function SMA(data: number[], period: number): number[] {
+  const result: number[] = new Array(data.length).fill(NaN);
+  
+  if (data.length < period) return result;
+  
+  // Calculate first SMA as simple average
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += data[i];
+  }
+  result[period - 1] = sum / period;
+  
+  // Sliding window for remaining values
+  for (let i = period; i < data.length; i++) {
+    sum = sum - data[i - period] + data[i];
+    result[i] = sum / period;
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 2. EXPONENTIAL MOVING AVERAGE (EMA)
+// ═══════════════════════════════════════
+// Formula: EMA_today = (Price_today × k) + (EMA_yesterday × (1 - k))
+// Where k = 2 / (period + 1) — the smoothing multiplier
+//
+// Why EMA over SMA: EMA gives more weight to recent prices,
+// reacts faster to price changes. Better for short-term signals.
+// 
+// Key EMAs:
+// EMA 9  — Very short term (scalping)
+// EMA 21 — Short term (intraday/swing)
+// EMA 50 — Medium term (swing/positional)
+// EMA 200 — Long term (major trend)
+
+export function EMA(data: number[], period: number): number[] {
+  const result: number[] = new Array(data.length).fill(NaN);
+  
+  if (data.length < period) return result;
+  
+  const multiplier = 2 / (period + 1);
+  
+  // First EMA value = SMA of first 'period' values
+  let sum = 0;
+  for (let i = 0; i < period; i++) {
+    sum += data[i];
+  }
+  result[period - 1] = sum / period;
+  
+  // Calculate remaining EMAs
+  for (let i = period; i < data.length; i++) {
+    result[i] = (data[i] - result[i - 1]) * multiplier + result[i - 1];
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 3. RSI — RELATIVE STRENGTH INDEX
+// ═══════════════════════════════════════
+// Developed by J. Welles Wilder Jr.
+//
+// Formula:
+//   RS = Average Gain over period / Average Loss over period
+//   RSI = 100 - (100 / (1 + RS))
+//
+// First Average Gain = Sum of gains over period / period
+// First Average Loss = Sum of losses over period / period
+// Subsequent: Smoothed using Wilder's method:
+//   Avg Gain = ((Prev Avg Gain × (period-1)) + Current Gain) / period
+//   Avg Loss = ((Prev Avg Loss × (period-1)) + Current Loss) / period
+//
+// Interpretation:
+//   RSI > 70 = OVERBOUGHT (potential sell signal)
+//   RSI < 30 = OVERSOLD (potential buy signal)
+//   RSI > 50 = Bullish momentum
+//   RSI < 50 = Bearish momentum
+//   RSI Divergence = Price makes new high but RSI doesn't = reversal warning
+//
+// Standard period: 14
+
+export function RSI(closes: number[], period: number = 14): number[] {
+  const result: number[] = new Array(closes.length).fill(NaN);
+  
+  if (closes.length < period + 1) return result;
+  
+  // Calculate price changes
+  const changes: number[] = [];
+  for (let i = 1; i < closes.length; i++) {
+    changes.push(closes[i] - closes[i - 1]);
+  }
+  
+  // Separate gains and losses
+  const gains: number[] = changes.map(c => c > 0 ? c : 0);
+  const losses: number[] = changes.map(c => c < 0 ? Math.abs(c) : 0);
+  
+  // First average gain and loss (simple average)
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 0; i < period; i++) {
+    avgGain += gains[i];
+    avgLoss += losses[i];
+  }
+  avgGain /= period;
+  avgLoss /= period;
+  
+  // First RSI value
+  if (avgLoss === 0) {
+    result[period] = 100;
+  } else {
+    const rs = avgGain / avgLoss;
+    result[period] = 100 - (100 / (1 + rs));
+  }
+  
+  // Wilder's smoothing for subsequent values
+  for (let i = period; i < changes.length; i++) {
+    avgGain = ((avgGain * (period - 1)) + gains[i]) / period;
+    avgLoss = ((avgLoss * (period - 1)) + losses[i]) / period;
+    
+    if (avgLoss === 0) {
+      result[i + 1] = 100;
+    } else {
+      const rs = avgGain / avgLoss;
+      result[i + 1] = 100 - (100 / (1 + rs));
+    }
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 4. MACD — MOVING AVERAGE CONVERGENCE DIVERGENCE
+// ═══════════════════════════════════════
+// Developed by Gerald Appel
+//
+// Components:
+//   MACD Line = EMA(fast_period) - EMA(slow_period)
+//   Signal Line = EMA of MACD Line over signal_period
+//   Histogram = MACD Line - Signal Line
+//
+// Standard: fast=12, slow=26, signal=9
+//
+// Signals:
+//   MACD crosses ABOVE Signal = BULLISH CROSSOVER (Buy)
+//   MACD crosses BELOW Signal = BEARISH CROSSOVER (Sell)
+//   Histogram positive & growing = Bullish momentum increasing
+//   Histogram negative & growing = Bearish momentum increasing
+//   Zero line cross = Major trend change
+//   Divergence = Price vs MACD disagreement = reversal warning
+
+export interface MACDResult {
+  macdLine: number[];
+  signalLine: number[];
+  histogram: number[];
+}
+
+export function MACD(
+  closes: number[],
+  fastPeriod: number = 12,
+  slowPeriod: number = 26,
+  signalPeriod: number = 9
+): MACDResult {
+  const fastEMA = EMA(closes, fastPeriod);
+  const slowEMA = EMA(closes, slowPeriod);
+  
+  // MACD Line = Fast EMA - Slow EMA
+  const macdLine: number[] = new Array(closes.length).fill(NaN);
+  for (let i = 0; i < closes.length; i++) {
+    if (!isNaN(fastEMA[i]) && !isNaN(slowEMA[i])) {
+      macdLine[i] = fastEMA[i] - slowEMA[i];
+    }
+  }
+  
+  // Signal Line = EMA of MACD Line
+  const validMacd = macdLine.filter(v => !isNaN(v));
+  const signalEMA = EMA(validMacd, signalPeriod);
+  
+  // Map signal EMA back to full array
+  const signalLine: number[] = new Array(closes.length).fill(NaN);
+  let validIdx = 0;
+  for (let i = 0; i < closes.length; i++) {
+    if (!isNaN(macdLine[i])) {
+      if (validIdx < signalEMA.length) {
+        signalLine[i] = signalEMA[validIdx];
+      }
+      validIdx++;
+    }
+  }
+  
+  // Histogram = MACD Line - Signal Line
+  const histogram: number[] = new Array(closes.length).fill(NaN);
+  for (let i = 0; i < closes.length; i++) {
+    if (!isNaN(macdLine[i]) && !isNaN(signalLine[i])) {
+      histogram[i] = macdLine[i] - signalLine[i];
+    }
+  }
+  
+  return { macdLine, signalLine, histogram };
+}
+
+// ═══════════════════════════════════════
+// 5. BOLLINGER BANDS
+// ═══════════════════════════════════════
+// Developed by John Bollinger
+//
+// Formula:
+//   Middle Band = SMA(period)
+//   Upper Band = Middle Band + (stdDev_multiplier × Standard Deviation)
+//   Lower Band = Middle Band - (stdDev_multiplier × Standard Deviation)
+//
+// Standard: period=20, stdDev=2
+//
+// Signals:
+//   Price touching Upper Band = Overbought / Strong uptrend
+//   Price touching Lower Band = Oversold / Strong downtrend
+//   Band Squeeze (bands narrow) = Low volatility, BIG MOVE coming
+//   Band Expansion = High volatility, trend in progress
+//   Price closing outside bands = Extreme move, reversal possible
+//   Walking the band = Strong trend (price stays near one band)
+//
+// Bandwidth = (Upper - Lower) / Middle × 100
+//   Low bandwidth = Squeeze = Breakout imminent
+
+export interface BollingerResult {
+  upper: number[];
+  middle: number[];
+  lower: number[];
+  bandwidth: number[];
+  percentB: number[];  // Where price is within the bands (0 = lower, 1 = upper)
+}
+
+export function BollingerBands(
+  closes: number[],
+  period: number = 20,
+  stdDevMultiplier: number = 2
+): BollingerResult {
+  const middle = SMA(closes, period);
+  const upper: number[] = new Array(closes.length).fill(NaN);
+  const lower: number[] = new Array(closes.length).fill(NaN);
+  const bandwidth: number[] = new Array(closes.length).fill(NaN);
+  const percentB: number[] = new Array(closes.length).fill(NaN);
+  
+  for (let i = period - 1; i < closes.length; i++) {
+    // Calculate standard deviation for the window
+    const window = closes.slice(i - period + 1, i + 1);
+    const mean = middle[i];
+    
+    if (isNaN(mean)) continue;
+    
+    let sumSquaredDiff = 0;
+    for (const val of window) {
+      sumSquaredDiff += (val - mean) ** 2;
+    }
+    const stdDev = Math.sqrt(sumSquaredDiff / period);
+    
+    upper[i] = mean + (stdDevMultiplier * stdDev);
+    lower[i] = mean - (stdDevMultiplier * stdDev);
+    
+    // Bandwidth: Measures how wide the bands are relative to middle
+    bandwidth[i] = ((upper[i] - lower[i]) / mean) * 100;
+    
+    // %B: Where the current price sits within the bands
+    // 0 = at lower band, 1 = at upper band, >1 = above upper, <0 = below lower
+    if (upper[i] !== lower[i]) {
+      percentB[i] = (closes[i] - lower[i]) / (upper[i] - lower[i]);
+    }
+  }
+  
+  return { upper, middle, lower, bandwidth, percentB };
+}
+
+// ═══════════════════════════════════════
+// 6. STOCHASTIC OSCILLATOR
+// ═══════════════════════════════════════
+// Developed by George Lane
+//
+// Formula:
+//   %K = ((Close - Lowest Low) / (Highest High - Lowest Low)) × 100
+//   %D = SMA of %K over d_period (usually 3)
+//
+// The oscillator compares closing price to price range
+//
+// Standard: kPeriod=14, dPeriod=3, smooth=3
+//
+// Signals:
+//   %K > 80 = Overbought
+//   %K < 20 = Oversold
+//   %K crosses above %D in oversold zone = BUY signal (strong)
+//   %K crosses below %D in overbought zone = SELL signal (strong)
+//   Bullish divergence = Price lower low, Stoch higher low
+//   Bearish divergence = Price higher high, Stoch lower high
+
+export interface StochasticResult {
+  k: number[];
+  d: number[];
+}
+
+export function Stochastic(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  kPeriod: number = 14,
+  dPeriod: number = 3,
+  smooth: number = 3
+): StochasticResult {
+  const rawK: number[] = new Array(closes.length).fill(NaN);
+  
+  for (let i = kPeriod - 1; i < closes.length; i++) {
+    let highestHigh = -Infinity;
+    let lowestLow = Infinity;
+    
+    for (let j = i - kPeriod + 1; j <= i; j++) {
+      if (highs[j] > highestHigh) highestHigh = highs[j];
+      if (lows[j] < lowestLow) lowestLow = lows[j];
+    }
+    
+    const range = highestHigh - lowestLow;
+    if (range === 0) {
+      rawK[i] = 50; // Midpoint if no range
+    } else {
+      rawK[i] = ((closes[i] - lowestLow) / range) * 100;
+    }
+  }
+  
+  // Smooth %K if smooth > 1
+  const validRawK = rawK.filter(v => !isNaN(v));
+  let k: number[];
+  if (smooth > 1) {
+    const smoothedK = SMA(validRawK, smooth);
+    k = new Array(closes.length).fill(NaN);
+    let idx = 0;
+    for (let i = 0; i < closes.length; i++) {
+      if (!isNaN(rawK[i])) {
+        if (idx < smoothedK.length && !isNaN(smoothedK[idx])) {
+          k[i] = smoothedK[idx];
+        }
+        idx++;
+      }
+    }
+  } else {
+    k = [...rawK];
+  }
+  
+  // %D = SMA of %K
+  const validK = k.filter(v => !isNaN(v));
+  const smaD = SMA(validK, dPeriod);
+  const d: number[] = new Array(closes.length).fill(NaN);
+  let dIdx = 0;
+  for (let i = 0; i < closes.length; i++) {
+    if (!isNaN(k[i])) {
+      if (dIdx < smaD.length && !isNaN(smaD[dIdx])) {
+        d[i] = smaD[dIdx];
+      }
+      dIdx++;
+    }
+  }
+  
+  return { k, d };
+}
+
+// ═══════════════════════════════════════
+// 7. ATR — AVERAGE TRUE RANGE
+// ═══════════════════════════════════════
+// Developed by J. Welles Wilder Jr.
+//
+// True Range = MAX of:
+//   1. Current High - Current Low
+//   2. |Current High - Previous Close|
+//   3. |Current Low - Previous Close|
+//
+// ATR = Wilder's smoothed average of True Range over period
+// First ATR = Simple average of first 'period' True Ranges
+// Subsequent: ATR = ((Previous ATR × (period-1)) + Current TR) / period
+//
+// Usage: 
+//   - Measures VOLATILITY (not direction)
+//   - Higher ATR = More volatile = Wider stop losses needed
+//   - Lower ATR = Less volatile = Tighter stops OK
+//   - ATR × 2 = Common stop loss distance
+//   - ATR × 3 = Conservative stop loss
+//   - Used in position sizing: Risk per share = ATR × multiplier
+
+export function ATR(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 14
+): number[] {
+  const result: number[] = new Array(closes.length).fill(NaN);
+  
+  if (closes.length < period + 1) return result;
+  
+  // Calculate True Range for each bar
+  const trueRanges: number[] = [highs[0] - lows[0]]; // First TR = High - Low
+  
+  for (let i = 1; i < closes.length; i++) {
+    const tr = Math.max(
+      highs[i] - lows[i],                    // Current range
+      Math.abs(highs[i] - closes[i - 1]),     // Gap up
+      Math.abs(lows[i] - closes[i - 1])       // Gap down
+    );
+    trueRanges.push(tr);
+  }
+  
+  // First ATR = Simple average of first 'period' true ranges
+  let atr = 0;
+  for (let i = 0; i < period; i++) {
+    atr += trueRanges[i];
+  }
+  atr /= period;
+  result[period - 1] = atr;
+  
+  // Wilder's smoothing for subsequent values
+  for (let i = period; i < closes.length; i++) {
+    atr = ((atr * (period - 1)) + trueRanges[i]) / period;
+    result[i] = atr;
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 8. SUPERTREND
+// ═══════════════════════════════════════
+// Based on ATR
+//
+// Formula:
+//   Basic Upper Band = (High + Low) / 2 + (Multiplier × ATR)
+//   Basic Lower Band = (High + Low) / 2 - (Multiplier × ATR)
+//
+//   Final Upper Band: 
+//     If Basic Upper Band < Previous Final Upper Band OR Previous Close > Previous Final Upper Band:
+//       Final Upper Band = Basic Upper Band
+//     Else: Final Upper Band = Previous Final Upper Band
+//
+//   Final Lower Band:
+//     If Basic Lower Band > Previous Final Lower Band OR Previous Close < Previous Final Lower Band:
+//       Final Lower Band = Basic Lower Band
+//     Else: Final Lower Band = Previous Final Lower Band
+//
+//   Supertrend:
+//     If Previous Supertrend == Previous Final Upper Band AND Close <= Final Upper Band:
+//       Supertrend = Final Upper Band (SELL)
+//     If Previous Supertrend == Previous Final Upper Band AND Close > Final Upper Band:
+//       Supertrend = Final Lower Band (BUY — Signal Change!)
+//     If Previous Supertrend == Previous Final Lower Band AND Close >= Final Lower Band:
+//       Supertrend = Final Lower Band (BUY)
+//     If Previous Supertrend == Previous Final Lower Band AND Close < Final Lower Band:
+//       Supertrend = Final Upper Band (SELL — Signal Change!)
+//
+// Standard: period=10, multiplier=3
+//
+// Signals:
+//   Supertrend below price (green) = UPTREND = BUY
+//   Supertrend above price (red) = DOWNTREND = SELL
+//   Color change = Trend reversal signal
+
+export interface SupertrendResult {
+  value: number[];
+  signal: string[];   // 'BUY' or 'SELL' for each candle
+  direction: number[]; // 1 for up, -1 for down
+}
+
+export function Supertrend(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 10,
+  multiplier: number = 3
+): SupertrendResult {
+  const atrValues = ATR(highs, lows, closes, period);
+  const len = closes.length;
+  
+  const value: number[] = new Array(len).fill(NaN);
+  const signal: string[] = new Array(len).fill('NEUTRAL');
+  const direction: number[] = new Array(len).fill(0);
+  
+  const finalUpperBand: number[] = new Array(len).fill(0);
+  const finalLowerBand: number[] = new Array(len).fill(0);
+  
+  for (let i = period - 1; i < len; i++) {
+    if (isNaN(atrValues[i])) continue;
+    
+    const hl2 = (highs[i] + lows[i]) / 2;
+    const basicUpperBand = hl2 + (multiplier * atrValues[i]);
+    const basicLowerBand = hl2 - (multiplier * atrValues[i]);
+    
+    // Final Upper Band
+    if (i === period - 1) {
+      finalUpperBand[i] = basicUpperBand;
+    } else {
+      finalUpperBand[i] = (basicUpperBand < finalUpperBand[i - 1] || closes[i - 1] > finalUpperBand[i - 1])
+        ? basicUpperBand
+        : finalUpperBand[i - 1];
+    }
+    
+    // Final Lower Band
+    if (i === period - 1) {
+      finalLowerBand[i] = basicLowerBand;
+    } else {
+      finalLowerBand[i] = (basicLowerBand > finalLowerBand[i - 1] || closes[i - 1] < finalLowerBand[i - 1])
+        ? basicLowerBand
+        : finalLowerBand[i - 1];
+    }
+    
+    // Supertrend Direction
+    if (i === period - 1) {
+      direction[i] = closes[i] > finalUpperBand[i] ? 1 : -1;
+    } else {
+      if (value[i - 1] === finalUpperBand[i - 1]) {
+        direction[i] = closes[i] > finalUpperBand[i] ? 1 : -1;
+      } else {
+        direction[i] = closes[i] < finalLowerBand[i] ? -1 : 1;
+      }
+    }
+    
+    value[i] = direction[i] === 1 ? finalLowerBand[i] : finalUpperBand[i];
+    signal[i] = direction[i] === 1 ? 'BUY' : 'SELL';
+  }
+  
+  return { value, signal, direction };
+}
+
+// ═══════════════════════════════════════
+// 9. ADX — AVERAGE DIRECTIONAL INDEX
+// ═══════════════════════════════════════
+// Developed by J. Welles Wilder Jr.
+//
+// Measures TREND STRENGTH (not direction)
+//
+// Steps:
+//   1. +DM = Current High - Previous High (if positive and > -DM, else 0)
+//   2. -DM = Previous Low - Current Low (if positive and > +DM, else 0)
+//   3. Smooth +DM and -DM using Wilder's smoothing (14 periods)
+//   4. +DI = (Smoothed +DM / ATR) × 100
+//   5. -DI = (Smoothed -DM / ATR) × 100
+//   6. DX = |+DI - -DI| / (+DI + -DI) × 100
+//   7. ADX = Wilder's smoothed average of DX over period
+//
+// Interpretation:
+//   ADX > 25 = Strong trend (trade with trend)
+//   ADX > 50 = Very strong trend
+//   ADX > 75 = Extremely strong trend (rare)
+//   ADX < 20 = No trend / ranging market (avoid trend strategies)
+//   ADX rising = Trend strengthening
+//   ADX falling = Trend weakening
+//   +DI > -DI = Bullish trend
+//   -DI > +DI = Bearish trend
+//   +DI crosses above -DI = Buy signal (if ADX > 25)
+//   -DI crosses above +DI = Sell signal (if ADX > 25)
+
+export interface ADXResult {
+  adx: number[];
+  plusDI: number[];
+  minusDI: number[];
+  dx: number[];
+}
+
+export function ADX(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 14
+): ADXResult {
+  const len = closes.length;
+  const adx: number[] = new Array(len).fill(NaN);
+  const plusDI: number[] = new Array(len).fill(NaN);
+  const minusDI: number[] = new Array(len).fill(NaN);
+  const dx: number[] = new Array(len).fill(NaN);
+  
+  if (len < period * 2) return { adx, plusDI, minusDI, dx };
+  
+  // Step 1: Calculate +DM and -DM
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+  const trueRanges: number[] = [];
+  
+  for (let i = 1; i < len; i++) {
+    const upMove = highs[i] - highs[i - 1];
+    const downMove = lows[i - 1] - lows[i];
+    
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+    
+    const tr = Math.max(
+      highs[i] - lows[i],
+      Math.abs(highs[i] - closes[i - 1]),
+      Math.abs(lows[i] - closes[i - 1])
+    );
+    trueRanges.push(tr);
+  }
+  
+  // Step 2: Wilder's smoothing for +DM, -DM, and TR
+  let smoothPlusDM = 0, smoothMinusDM = 0, smoothTR = 0;
+  for (let i = 0; i < period; i++) {
+    smoothPlusDM += plusDM[i];
+    smoothMinusDM += minusDM[i];
+    smoothTR += trueRanges[i];
+  }
+  
+  // First smoothed values
+  let pdi = smoothTR === 0 ? 0 : (smoothPlusDM / smoothTR) * 100;
+  let mdi = smoothTR === 0 ? 0 : (smoothMinusDM / smoothTR) * 100;
+  plusDI[period] = pdi;
+  minusDI[period] = mdi;
+  
+  const diSum = pdi + mdi;
+  dx[period] = diSum === 0 ? 0 : (Math.abs(pdi - mdi) / diSum) * 100;
+  
+  // Subsequent smoothed values
+  const dxValues: number[] = [dx[period]];
+  
+  for (let i = period; i < plusDM.length; i++) {
+    smoothPlusDM = smoothPlusDM - (smoothPlusDM / period) + plusDM[i];
+    smoothMinusDM = smoothMinusDM - (smoothMinusDM / period) + minusDM[i];
+    smoothTR = smoothTR - (smoothTR / period) + trueRanges[i];
+    
+    pdi = smoothTR === 0 ? 0 : (smoothPlusDM / smoothTR) * 100;
+    mdi = smoothTR === 0 ? 0 : (smoothMinusDM / smoothTR) * 100;
+    plusDI[i + 1] = pdi;
+    minusDI[i + 1] = mdi;
+    
+    const sum = pdi + mdi;
+    const dxVal = sum === 0 ? 0 : (Math.abs(pdi - mdi) / sum) * 100;
+    dx[i + 1] = dxVal;
+    dxValues.push(dxVal);
+  }
+  
+  // Step 3: ADX = Wilder's smoothed DX
+  if (dxValues.length >= period) {
+    let adxSum = 0;
+    for (let i = 0; i < period; i++) {
+      adxSum += dxValues[i];
+    }
+    let adxVal = adxSum / period;
+    
+    const startIdx = period + period; // where first ADX appears in full array
+    if (startIdx < len) adx[startIdx] = adxVal;
+    
+    for (let i = period; i < dxValues.length; i++) {
+      adxVal = ((adxVal * (period - 1)) + dxValues[i]) / period;
+      const fullIdx = i + period + 1;
+      if (fullIdx < len) adx[fullIdx] = adxVal;
+    }
+  }
+  
+  return { adx, plusDI, minusDI, dx };
+}
+
+// ═══════════════════════════════════════
+// 10. VWAP — VOLUME WEIGHTED AVERAGE PRICE
+// ═══════════════════════════════════════
+// Formula: VWAP = Cumulative(Typical Price × Volume) / Cumulative(Volume)
+// Typical Price = (High + Low + Close) / 3
+//
+// VWAP resets daily (intraday indicator)
+//
+// Signals:
+//   Price > VWAP = Bullish bias (buyers in control)
+//   Price < VWAP = Bearish bias (sellers in control)
+//   Price bouncing off VWAP = Support/Resistance
+//   Institutional traders use VWAP as benchmark
+
+export function VWAP(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  volumes: number[]
+): number[] {
+  const result: number[] = new Array(closes.length).fill(NaN);
+  
+  let cumulativeTPV = 0; // Cumulative (Typical Price × Volume)
+  let cumulativeVol = 0; // Cumulative Volume
+  
+  for (let i = 0; i < closes.length; i++) {
+    const typicalPrice = (highs[i] + lows[i] + closes[i]) / 3;
+    cumulativeTPV += typicalPrice * volumes[i];
+    cumulativeVol += volumes[i];
+    
+    result[i] = cumulativeVol === 0 ? typicalPrice : cumulativeTPV / cumulativeVol;
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 11. OBV — ON BALANCE VOLUME
+// ═══════════════════════════════════════
+// Developed by Joseph Granville
+//
+// Formula:
+//   If Close > Previous Close: OBV = Previous OBV + Volume
+//   If Close < Previous Close: OBV = Previous OBV - Volume
+//   If Close == Previous Close: OBV = Previous OBV
+//
+// Signals:
+//   OBV rising with price rising = Uptrend confirmed
+//   OBV falling with price falling = Downtrend confirmed
+//   OBV rising but price flat = Accumulation (smart money buying) → Price will rise
+//   OBV falling but price flat = Distribution (smart money selling) → Price will fall
+//   OBV divergence = Very strong reversal signal
+
+export function OBV(closes: number[], volumes: number[]): number[] {
+  const result: number[] = new Array(closes.length).fill(0);
+  result[0] = volumes[0];
+  
+  for (let i = 1; i < closes.length; i++) {
+    if (closes[i] > closes[i - 1]) {
+      result[i] = result[i - 1] + volumes[i];
+    } else if (closes[i] < closes[i - 1]) {
+      result[i] = result[i - 1] - volumes[i];
+    } else {
+      result[i] = result[i - 1];
+    }
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 12. CCI — COMMODITY CHANNEL INDEX
+// ═══════════════════════════════════════
+// Developed by Donald Lambert
+//
+// Formula:
+//   Typical Price = (High + Low + Close) / 3
+//   CCI = (Typical Price - SMA of Typical Price) / (0.015 × Mean Deviation)
+//   Mean Deviation = Average of |TP - SMA(TP)| over period
+//
+// The 0.015 constant ensures ~75% of CCI values fall between -100 and +100
+//
+// Signals:
+//   CCI > +100 = Overbought / Strong uptrend
+//   CCI < -100 = Oversold / Strong downtrend
+//   CCI crosses above +100 from below = Buy signal
+//   CCI crosses below -100 from above = Sell signal
+//   Zero line cross = Trend direction change
+
+export function CCI(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 20
+): number[] {
+  const result: number[] = new Array(closes.length).fill(NaN);
+  
+  // Calculate Typical Prices
+  const tp: number[] = [];
+  for (let i = 0; i < closes.length; i++) {
+    tp.push((highs[i] + lows[i] + closes[i]) / 3);
+  }
+  
+  for (let i = period - 1; i < closes.length; i++) {
+    // SMA of Typical Price
+    let tpSum = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      tpSum += tp[j];
+    }
+    const tpSMA = tpSum / period;
+    
+    // Mean Deviation
+    let mdSum = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      mdSum += Math.abs(tp[j] - tpSMA);
+    }
+    const meanDev = mdSum / period;
+    
+    // CCI
+    if (meanDev === 0) {
+      result[i] = 0;
+    } else {
+      result[i] = (tp[i] - tpSMA) / (0.015 * meanDev);
+    }
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 13. WILLIAMS %R
+// ═══════════════════════════════════════
+// Developed by Larry Williams
+//
+// Formula: %R = ((Highest High - Close) / (Highest High - Lowest Low)) × -100
+//
+// Range: -100 to 0
+// Similar to Stochastic but inverted
+//
+// Signals:
+//   %R > -20 = Overbought (near 0)
+//   %R < -80 = Oversold (near -100)
+//   Cross above -80 = Buy signal
+//   Cross below -20 = Sell signal
+
+export function WilliamsR(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  period: number = 14
+): number[] {
+  const result: number[] = new Array(closes.length).fill(NaN);
+  
+  for (let i = period - 1; i < closes.length; i++) {
+    let highestHigh = -Infinity;
+    let lowestLow = Infinity;
+    
+    for (let j = i - period + 1; j <= i; j++) {
+      if (highs[j] > highestHigh) highestHigh = highs[j];
+      if (lows[j] < lowestLow) lowestLow = lows[j];
+    }
+    
+    const range = highestHigh - lowestLow;
+    if (range === 0) {
+      result[i] = -50;
+    } else {
+      result[i] = ((highestHigh - closes[i]) / range) * -100;
+    }
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 14. MFI — MONEY FLOW INDEX
+// ═══════════════════════════════════════
+// "Volume-weighted RSI"
+//
+// Formula:
+//   Typical Price = (High + Low + Close) / 3
+//   Raw Money Flow = Typical Price × Volume
+//   If TP > Previous TP: Positive Money Flow
+//   If TP < Previous TP: Negative Money Flow
+//   Money Flow Ratio = Sum(Positive MF) / Sum(Negative MF) over period
+//   MFI = 100 - (100 / (1 + Money Flow Ratio))
+//
+// Signals:
+//   MFI > 80 = Overbought (with volume confirmation)
+//   MFI < 20 = Oversold (with volume confirmation)
+//   MFI divergence with price = Strong reversal signal
+//   More reliable than RSI because it includes volume
+
+export function MFI(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  volumes: number[],
+  period: number = 14
+): number[] {
+  const result: number[] = new Array(closes.length).fill(NaN);
+  
+  if (closes.length < period + 1) return result;
+  
+  // Typical Price and Raw Money Flow
+  const tp: number[] = [];
+  const rawMF: number[] = [];
+  
+  for (let i = 0; i < closes.length; i++) {
+    const typicalPrice = (highs[i] + lows[i] + closes[i]) / 3;
+    tp.push(typicalPrice);
+    rawMF.push(typicalPrice * volumes[i]);
+  }
+  
+  // Calculate MFI for each position
+  for (let i = period; i < closes.length; i++) {
+    let positiveMF = 0;
+    let negativeMF = 0;
+    
+    for (let j = i - period + 1; j <= i; j++) {
+      if (tp[j] > tp[j - 1]) {
+        positiveMF += rawMF[j];
+      } else if (tp[j] < tp[j - 1]) {
+        negativeMF += rawMF[j];
+      }
+    }
+    
+    if (negativeMF === 0) {
+      result[i] = 100;
+    } else {
+      const mfRatio = positiveMF / negativeMF;
+      result[i] = 100 - (100 / (1 + mfRatio));
+    }
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 15. PARABOLIC SAR
+// ═══════════════════════════════════════
+// Developed by J. Welles Wilder Jr.
+//
+// Provides potential entry and exit points
+// Dots below price = Uptrend (BUY)
+// Dots above price = Downtrend (SELL)
+//
+// Algorithm:
+//   Rising SAR: SAR = Previous SAR + AF × (EP - Previous SAR)
+//   Falling SAR: SAR = Previous SAR + AF × (EP - Previous SAR)
+//   AF starts at 'step' (0.02), increases by 'step' each time EP is updated, max 'max' (0.2)
+//   EP = Extreme Point (highest high in uptrend, lowest low in downtrend)
+//
+// When price crosses SAR → Trend reversal
+
+export interface ParabolicSARResult {
+  value: number[];
+  signal: string[];   // 'BUY' or 'SELL'
+}
+
+export function ParabolicSAR(
+  highs: number[],
+  lows: number[],
+  closes: number[],
+  step: number = 0.02,
+  max: number = 0.2
+): ParabolicSARResult {
+  const len = closes.length;
+  const value: number[] = new Array(len).fill(NaN);
+  const signal: string[] = new Array(len).fill('NEUTRAL');
+  
+  if (len < 2) return { value, signal };
+  
+  // Initialize
+  let isUpTrend = closes[1] > closes[0];
+  let af = step;
+  let ep = isUpTrend ? highs[0] : lows[0];
+  let sar = isUpTrend ? lows[0] : highs[0];
+  
+  value[0] = sar;
+  signal[0] = isUpTrend ? 'BUY' : 'SELL';
+  
+  for (let i = 1; i < len; i++) {
+    // Calculate new SAR
+    let newSar = sar + af * (ep - sar);
+    
+    if (isUpTrend) {
+      // In uptrend, SAR cannot be above the two previous lows
+      if (i >= 2) {
+        newSar = Math.min(newSar, lows[i - 1], lows[i - 2]);
+      } else {
+        newSar = Math.min(newSar, lows[i - 1]);
+      }
+      
+      // Check for reversal
+      if (newSar > lows[i]) {
+        // Reversal to downtrend
+        isUpTrend = false;
+        newSar = ep; // SAR = previous EP
+        af = step;
+        ep = lows[i];
+      } else {
+        // Continue uptrend
+        if (highs[i] > ep) {
+          ep = highs[i];
+          af = Math.min(af + step, max);
+        }
+      }
+    } else {
+      // In downtrend, SAR cannot be below the two previous highs
+      if (i >= 2) {
+        newSar = Math.max(newSar, highs[i - 1], highs[i - 2]);
+      } else {
+        newSar = Math.max(newSar, highs[i - 1]);
+      }
+      
+      // Check for reversal
+      if (newSar < highs[i]) {
+        // Reversal to uptrend
+        isUpTrend = true;
+        newSar = ep;
+        af = step;
+        ep = highs[i];
+      } else {
+        // Continue downtrend
+        if (lows[i] < ep) {
+          ep = lows[i];
+          af = Math.min(af + step, max);
+        }
+      }
+    }
+    
+    sar = newSar;
+    value[i] = sar;
+    signal[i] = isUpTrend ? 'BUY' : 'SELL';
+  }
+  
+  return { value, signal };
+}
+
+// ═══════════════════════════════════════
+// 16. PIVOT POINTS
+// ═══════════════════════════════════════
+// Classic floor trader method
+//
+// Standard Pivot:
+//   Pivot = (High + Low + Close) / 3
+//   R1 = (2 × Pivot) - Low
+//   S1 = (2 × Pivot) - High
+//   R2 = Pivot + (High - Low)
+//   S2 = Pivot - (High - Low)
+//   R3 = High + 2 × (Pivot - Low)
+//   S3 = Low - 2 × (High - Pivot)
+//
+// These levels act as support/resistance for the next trading session
+
+export interface PivotPoints {
+  pivot: number;
+  r1: number;
+  r2: number;
+  r3: number;
+  s1: number;
+  s2: number;
+  s3: number;
+}
+
+export function calculatePivotPoints(high: number, low: number, close: number): PivotPoints {
+  const pivot = (high + low + close) / 3;
+  const range = high - low;
+  
+  return {
+    pivot: Math.round(pivot * 100) / 100,
+    r1: Math.round(((2 * pivot) - low) * 100) / 100,
+    r2: Math.round((pivot + range) * 100) / 100,
+    r3: Math.round((high + 2 * (pivot - low)) * 100) / 100,
+    s1: Math.round(((2 * pivot) - high) * 100) / 100,
+    s2: Math.round((pivot - range) * 100) / 100,
+    s3: Math.round((low - 2 * (high - pivot)) * 100) / 100,
+  };
+}
+
+// ═══════════════════════════════════════
+// 17. SUPPORT & RESISTANCE DETECTION
+// ═══════════════════════════════════════
+// Algorithm: Find price levels where price has reversed multiple times
+// 
+// Method:
+//   1. Find all swing highs (local maxima) and swing lows (local minima)
+//   2. Cluster nearby levels together (within 0.5% of each other)
+//   3. Rank levels by number of touches
+//   4. Return top support and resistance levels
+
+export function findSupportResistance(
+  candles: OHLCV[],
+  lookback: number = 50,
+  sensitivity: number = 3, // How many candles to check on each side
+  clusterPercent: number = 0.005 // 0.5% clustering threshold
+): { supports: number[]; resistances: number[] } {
+  const start = Math.max(0, candles.length - lookback);
+  const relevantCandles = candles.slice(start);
+  const currentPrice = relevantCandles[relevantCandles.length - 1].close;
+  
+  const swingHighs: number[] = [];
+  const swingLows: number[] = [];
+  
+  // Find swing points
+  for (let i = sensitivity; i < relevantCandles.length - sensitivity; i++) {
+    let isSwingHigh = true;
+    let isSwingLow = true;
+    
+    for (let j = 1; j <= sensitivity; j++) {
+      if (relevantCandles[i].high <= relevantCandles[i - j].high ||
+          relevantCandles[i].high <= relevantCandles[i + j].high) {
+        isSwingHigh = false;
+      }
+      if (relevantCandles[i].low >= relevantCandles[i - j].low ||
+          relevantCandles[i].low >= relevantCandles[i + j].low) {
+        isSwingLow = false;
+      }
+    }
+    
+    if (isSwingHigh) swingHighs.push(relevantCandles[i].high);
+    if (isSwingLow) swingLows.push(relevantCandles[i].low);
+  }
+  
+  // Cluster nearby levels
+  function clusterLevels(levels: number[]): number[] {
+    if (levels.length === 0) return [];
+    
+    levels.sort((a, b) => a - b);
+    const clusters: number[][] = [[levels[0]]];
+    
+    for (let i = 1; i < levels.length; i++) {
+      const lastCluster = clusters[clusters.length - 1];
+      const lastAvg = lastCluster.reduce((a, b) => a + b) / lastCluster.length;
+      
+      if (Math.abs(levels[i] - lastAvg) / lastAvg < clusterPercent) {
+        lastCluster.push(levels[i]);
+      } else {
+        clusters.push([levels[i]]);
+      }
+    }
+    
+    // Return average of each cluster, sorted by cluster size (strength)
+    return clusters
+      .filter(c => c.length >= 2) // At least 2 touches
+      .sort((a, b) => b.length - a.length) // Most touched first
+      .map(c => Math.round((c.reduce((a, b) => a + b) / c.length) * 100) / 100)
+      .slice(0, 5); // Top 5 levels
+  }
+  
+  const allLevels = [...swingHighs, ...swingLows];
+  const clustered = clusterLevels(allLevels);
+  
+  const supports = clustered.filter(level => level < currentPrice).sort((a, b) => b - a).slice(0, 3);
+  const resistances = clustered.filter(level => level > currentPrice).sort((a, b) => a - b).slice(0, 3);
+  
+  // If not enough levels found, use simple method
+  if (supports.length < 2) {
+    const recentLows = relevantCandles.map(c => c.low).sort((a, b) => a - b);
+    while (supports.length < 3 && recentLows.length > 0) {
+      const low = recentLows.shift()!;
+      if (low < currentPrice && !supports.some(s => Math.abs(s - low) / low < 0.005)) {
+        supports.push(Math.round(low * 100) / 100);
+      }
+    }
+  }
+  
+  if (resistances.length < 2) {
+    const recentHighs = relevantCandles.map(c => c.high).sort((a, b) => b - a);
+    while (resistances.length < 3 && recentHighs.length > 0) {
+      const high = recentHighs.shift()!;
+      if (high > currentPrice && !resistances.some(r => Math.abs(r - high) / high < 0.005)) {
+        resistances.push(Math.round(high * 100) / 100);
+      }
+    }
+  }
+  
+  return {
+    supports: supports.sort((a, b) => b - a).slice(0, 3),
+    resistances: resistances.sort((a, b) => a - b).slice(0, 3),
+  };
+}
+
+// ═══════════════════════════════════════
+// 18. RSI DIVERGENCE DETECTION
+// ═══════════════════════════════════════
+// Bullish Divergence: Price makes LOWER LOW but RSI makes HIGHER LOW → Reversal UP
+// Bearish Divergence: Price makes HIGHER HIGH but RSI makes LOWER HIGH → Reversal DOWN
+
+export interface DivergenceResult {
+  bullishDivergence: boolean;
+  bearishDivergence: boolean;
+  description: string;
+}
+
+export function detectRSIDivergence(
+  closes: number[],
+  rsiValues: number[],
+  lookback: number = 20
+): DivergenceResult {
+  const result: DivergenceResult = {
+    bullishDivergence: false,
+    bearishDivergence: false,
+    description: ''
+  };
+  
+  const len = closes.length;
+  if (len < lookback + 5) return result;
+  
+  const start = len - lookback;
+  
+  // Find recent swing lows in price and RSI
+  let priceLow1 = Infinity, priceLow2 = Infinity;
+  let rsiLow1 = Infinity, rsiLow2 = Infinity;
+  let priceLow1Idx = -1, priceLow2Idx = -1;
+  
+  // Find recent swing highs
+  let priceHigh1 = -Infinity, priceHigh2 = -Infinity;
+  let rsiHigh1 = -Infinity, rsiHigh2 = -Infinity;
+  
+  // Simple: compare last 5 candles vs previous 5-15 candles
+  const recentClose = closes[len - 1];
+  const recentRSI = rsiValues[len - 1];
+  
+  // Find lowest low in last 5 candles
+  for (let i = len - 5; i < len; i++) {
+    if (closes[i] < priceLow1) {
+      priceLow1 = closes[i];
+      rsiLow1 = rsiValues[i] || 50;
+    }
+  }
+  
+  // Find lowest low in previous 10-20 candles
+  for (let i = len - lookback; i < len - 5; i++) {
+    if (closes[i] < priceLow2) {
+      priceLow2 = closes[i];
+      rsiLow2 = rsiValues[i] || 50;
+    }
+  }
+  
+  // Find highest high in last 5 candles
+  for (let i = len - 5; i < len; i++) {
+    if (closes[i] > priceHigh1) {
+      priceHigh1 = closes[i];
+      rsiHigh1 = rsiValues[i] || 50;
+    }
+  }
+  
+  // Find highest high in previous 10-20 candles
+  for (let i = len - lookback; i < len - 5; i++) {
+    if (closes[i] > priceHigh2) {
+      priceHigh2 = closes[i];
+      rsiHigh2 = rsiValues[i] || 50;
+    }
+  }
+  
+  // Bullish Divergence: Price lower low, RSI higher low
+  if (priceLow1 < priceLow2 && rsiLow1 > rsiLow2 && !isNaN(rsiLow1) && !isNaN(rsiLow2)) {
+    result.bullishDivergence = true;
+    result.description = `Bullish RSI Divergence: Price made lower low (₹${priceLow1.toFixed(2)} vs ₹${priceLow2.toFixed(2)}) but RSI made higher low (${rsiLow1.toFixed(1)} vs ${rsiLow2.toFixed(1)}). Reversal UP likely.`;
+  }
+  
+  // Bearish Divergence: Price higher high, RSI lower high
+  if (priceHigh1 > priceHigh2 && rsiHigh1 < rsiHigh2 && !isNaN(rsiHigh1) && !isNaN(rsiHigh2)) {
+    result.bearishDivergence = true;
+    result.description = `Bearish RSI Divergence: Price made higher high (₹${priceHigh1.toFixed(2)} vs ₹${priceHigh2.toFixed(2)}) but RSI made lower high (${rsiHigh1.toFixed(1)} vs ${rsiHigh2.toFixed(1)}). Reversal DOWN likely.`;
+  }
+  
+  return result;
+}
+
+// ═══════════════════════════════════════
+// 19. VOLUME ANALYSIS
+// ═══════════════════════════════════════
+
+export interface VolumeAnalysis {
+  currentVolume: number;
+  averageVolume: number;
+  volumeRatio: number;       // Current / Average
+  isVolumeSpike: boolean;    // > 2x average
+  isHighVolume: boolean;     // > 1.5x average
+  isLowVolume: boolean;      // < 0.5x average
+  volumeTrend: 'increasing' | 'decreasing' | 'stable';
+  buyingVolume: number;      // Volume on up candles
+  sellingVolume: number;     // Volume on down candles
+  description: string;
+}
+
+export function analyzeVolume(candles: OHLCV[], period: number = 20): VolumeAnalysis {
+  const len = candles.length;
+  const currentVolume = candles[len - 1].volume;
+  
+  // Average volume over period
+  let avgVol = 0;
+  const start = Math.max(0, len - period);
+  for (let i = start; i < len; i++) {
+    avgVol += candles[i].volume;
+  }
+  avgVol /= (len - start);
+  
+  const ratio = avgVol > 0 ? currentVolume / avgVol : 1;
+  
+  // Volume trend (compare last 5 average vs previous 5 average)
+  let recent5Vol = 0, prev5Vol = 0;
+  for (let i = len - 5; i < len; i++) {
+    recent5Vol += candles[i].volume;
+  }
+  for (let i = len - 10; i < len - 5; i++) {
+    if (i >= 0) prev5Vol += candles[i].volume;
+  }
+  recent5Vol /= 5;
+  prev5Vol /= 5;
+  
+  let volumeTrend: 'increasing' | 'decreasing' | 'stable' = 'stable';
+  if (prev5Vol > 0) {
+    const trendRatio = recent5Vol / prev5Vol;
+    if (trendRatio > 1.2) volumeTrend = 'increasing';
+    else if (trendRatio < 0.8) volumeTrend = 'decreasing';
+  }
+  
+  // Buying vs Selling volume (last 10 candles)
+  let buyVol = 0, sellVol = 0;
+  for (let i = Math.max(0, len - 10); i < len; i++) {
+    if (candles[i].close > candles[i].open) {
+      buyVol += candles[i].volume;
+    } else {
+      sellVol += candles[i].volume;
+    }
+  }
+  
+  let description = '';
+  if (ratio > 2) description = `Volume spike ${ratio.toFixed(1)}x above average — Very strong interest`;
+  else if (ratio > 1.5) description = `Above average volume (${ratio.toFixed(1)}x) — Confirms price movement`;
+  else if (ratio < 0.5) description = `Low volume (${ratio.toFixed(1)}x average) — Weak conviction, move may not sustain`;
+  else description = `Normal volume (${ratio.toFixed(1)}x average)`;
+  
+  if (buyVol > sellVol * 1.5) description += '. Buying pressure dominant.';
+  else if (sellVol > buyVol * 1.5) description += '. Selling pressure dominant.';
+  
+  return {
+    currentVolume,
+    averageVolume: Math.round(avgVol),
+    volumeRatio: Math.round(ratio * 100) / 100,
+    isVolumeSpike: ratio > 2,
+    isHighVolume: ratio > 1.5,
+    isLowVolume: ratio < 0.5,
+    volumeTrend,
+    buyingVolume: buyVol,
+    sellingVolume: sellVol,
+    description,
+  };
+}
+
+// ═══════════════════════════════════════
+// 20. SWING HIGH / SWING LOW DETECTION
+// ═══════════════════════════════════════
+// Used for stop loss placement
+
+export function findSwingLow(candles: OHLCV[], lookback: number = 20): number {
+  const start = Math.max(0, candles.length - lookback);
+  let lowest = Infinity;
+  for (let i = start; i < candles.length; i++) {
+    if (candles[i].low < lowest) lowest = candles[i].low;
+  }
+  return lowest;
+}
+
+export function findSwingHigh(candles: OHLCV[], lookback: number = 20): number {
+  const start = Math.max(0, candles.length - lookback);
+  let highest = -Infinity;
+  for (let i = start; i < candles.length; i++) {
+    if (candles[i].high > highest) highest = candles[i].high;
+  }
+  return highest;
+}
+
+
+
+// ═══════════════════════════════════════════════════════════
+// TradeSignal Pro — Pattern Detection Engine
+// Detects 22 candlestick patterns + 12 chart patterns
+// Made with ❤️ by Shahrukh
+// ═══════════════════════════════════════════════════════════
+
+import { OHLCV } from './indicators';
+
+export interface DetectedPattern {
+  name: string;
+  type: 'bullish' | 'bearish' | 'neutral';
+  reliability: 'high' | 'medium' | 'low';
+  description: string;
+  position: number;  // Candle index where detected
+  category: 'candlestick' | 'chart';
+}
+
+// ═══════════════════════════════════════
+// HELPER FUNCTIONS
+// ═══════════════════════════════════════
+
+function bodySize(c: OHLCV): number {
+  return Math.abs(c.close - c.open);
+}
+
+function candleRange(c: OHLCV): number {
+  return c.high - c.low;
+}
+
+function upperWick(c: OHLCV): number {
+  return c.high - Math.max(c.open, c.close);
+}
+
+function lowerWick(c: OHLCV): number {
+  return Math.min(c.open, c.close) - c.low;
+}
+
+function isBullish(c: OHLCV): boolean {
+  return c.close > c.open;
+}
+
+function isBearish(c: OHLCV): boolean {
+  return c.close < c.open;
+}
+
+function bodyMidpoint(c: OHLCV): number {
+  return (c.open + c.close) / 2;
+}
+
+function isSmallBody(c: OHLCV, avgBody: number): boolean {
+  return bodySize(c) < avgBody * 0.3;
+}
+
+function isLargeBody(c: OHLCV, avgBody: number): boolean {
+  return bodySize(c) > avgBody * 1.3;
+}
+
+function getAverageBodySize(candles: OHLCV[], lookback: number = 14): number {
+  const start = Math.max(0, candles.length - lookback);
+  let sum = 0;
+  for (let i = start; i < candles.length; i++) {
+    sum += bodySize(candles[i]);
+  }
+  return sum / (candles.length - start);
+}
+
+function isUptrend(candles: OHLCV[], period: number = 5): boolean {
+  const start = Math.max(0, candles.length - period);
+  let rising = 0;
+  for (let i = start + 1; i < candles.length; i++) {
+    if (candles[i].close > candles[i - 1].close) rising++;
+  }
+  return rising > (candles.length - start - 1) * 0.6;
+}
+
+function isDowntrend(candles: OHLCV[], period: number = 5): boolean {
+  const start = Math.max(0, candles.length - period);
+  let falling = 0;
+  for (let i = start + 1; i < candles.length; i++) {
+    if (candles[i].close < candles[i - 1].close) falling++;
+  }
+  return falling > (candles.length - start - 1) * 0.6;
+}
+
+// ═══════════════════════════════════════
+// CANDLESTICK PATTERN DETECTION
+// ═══════════════════════════════════════
+
+// 1. DOJI — Open ≈ Close (body < 10% of range)
+// Meaning: Market indecision. Neither buyers nor sellers won.
+// After uptrend = Potential reversal down. After downtrend = Potential reversal up.
+function isDoji(c: OHLCV): boolean {
+  const range = candleRange(c);
+  if (range === 0) return true;
+  return bodySize(c) / range < 0.1;
+}
+
+// 2. DRAGONFLY DOJI — Doji with long lower wick, no upper wick
+// Meaning: Sellers pushed price down but buyers fought back completely
+// At bottom of downtrend = Strong bullish reversal signal
+function isDragonflyDoji(c: OHLCV): boolean {
+  const range = candleRange(c);
+  if (range === 0) return false;
+  return isDoji(c) && lowerWick(c) / range > 0.7 && upperWick(c) / range < 0.1;
+}
+
+// 3. GRAVESTONE DOJI — Doji with long upper wick, no lower wick
+// Meaning: Buyers pushed price up but sellers crushed it back
+// At top of uptrend = Strong bearish reversal signal
+function isGravestoneDoji(c: OHLCV): boolean {
+  const range = candleRange(c);
+  if (range === 0) return false;
+  return isDoji(c) && upperWick(c) / range > 0.7 && lowerWick(c) / range < 0.1;
+}
+
+// 4. HAMMER — Small body at top, long lower wick (2x+ body)
+// Meaning: Sellers pushed down hard but buyers absorbed all selling
+// At bottom of downtrend = Bullish reversal (very reliable)
+function isHammer(c: OHLCV, avgBody: number): boolean {
+  const body = bodySize(c);
+  const lw = lowerWick(c);
+  const uw = upperWick(c);
+  return body > 0 && lw >= body * 2 && uw < body * 0.5 && body < avgBody * 1.5;
+}
+
+// 5. INVERTED HAMMER — Small body at bottom, long upper wick
+// Meaning: Buying pressure emerging after a decline
+// At bottom of downtrend = Potential bullish reversal (needs confirmation)
+function isInvertedHammer(c: OHLCV, avgBody: number): boolean {
+  const body = bodySize(c);
+  const uw = upperWick(c);
+  const lw = lowerWick(c);
+  return body > 0 && uw >= body * 2 && lw < body * 0.5 && body < avgBody * 1.5;
+}
+
+// 6. SHOOTING STAR — Same shape as inverted hammer but after uptrend
+// Meaning: Buyers tried to push higher but sellers rejected
+// At top of uptrend = Bearish reversal signal
+function isShootingStar(c: OHLCV, candles: OHLCV[], idx: number, avgBody: number): boolean {
+  if (idx < 5) return false;
+  const prev = candles.slice(Math.max(0, idx - 5), idx);
+  return isInvertedHammer(c, avgBody) && isUptrend(prev);
+}
+
+// 7. HANGING MAN — Same shape as hammer but after uptrend
+// Meaning: Selling pressure emerging at the top
+// At top of uptrend = Bearish reversal warning
+function isHangingMan(c: OHLCV, candles: OHLCV[], idx: number, avgBody: number): boolean {
+  if (idx < 5) return false;
+  const prev = candles.slice(Math.max(0, idx - 5), idx);
+  return isHammer(c, avgBody) && isUptrend(prev);
+}
+
+// 8. BULLISH ENGULFING — Bearish candle followed by larger bullish candle that completely engulfs it
+// Meaning: Buyers completely overwhelmed sellers
+// Strong bullish reversal signal (reliability: HIGH)
+function isBullishEngulfing(prev: OHLCV, current: OHLCV): boolean {
+  return isBearish(prev) && isBullish(current) &&
+    current.open <= prev.close && current.close >= prev.open &&
+    bodySize(current) > bodySize(prev);
+}
+
+// 9. BEARISH ENGULFING — Bullish candle followed by larger bearish candle
+// Meaning: Sellers completely overwhelmed buyers
+// Strong bearish reversal signal (reliability: HIGH)
+function isBearishEngulfing(prev: OHLCV, current: OHLCV): boolean {
+  return isBullish(prev) && isBearish(current) &&
+    current.open >= prev.close && current.close <= prev.open &&
+    bodySize(current) > bodySize(prev);
+}
+
+// 10. MORNING STAR — Three candle bullish reversal
+// Candle 1: Large bearish body
+// Candle 2: Small body (gap down, can be bullish or bearish) — the "star"
+// Candle 3: Large bullish body closing into candle 1's body
+// Meaning: Selling exhausted, buyers taking control
+// Reliability: VERY HIGH
+function isMorningStar(c1: OHLCV, c2: OHLCV, c3: OHLCV, avgBody: number): boolean {
+  return isBearish(c1) && isLargeBody(c1, avgBody) &&
+    isSmallBody(c2, avgBody) &&
+    isBullish(c3) && isLargeBody(c3, avgBody) &&
+    c3.close > bodyMidpoint(c1);
+}
+
+// 11. EVENING STAR — Three candle bearish reversal (opposite of Morning Star)
+// Candle 1: Large bullish
+// Candle 2: Small body (gap up)
+// Candle 3: Large bearish closing into candle 1's body
+// Reliability: VERY HIGH
+function isEveningStar(c1: OHLCV, c2: OHLCV, c3: OHLCV, avgBody: number): boolean {
+  return isBullish(c1) && isLargeBody(c1, avgBody) &&
+    isSmallBody(c2, avgBody) &&
+    isBearish(c3) && isLargeBody(c3, avgBody) &&
+    c3.close < bodyMidpoint(c1);
+}
+
+// 12. THREE WHITE SOLDIERS — Three consecutive bullish candles with progressively higher closes
+// Each opens within previous body and closes near its high
+// Meaning: Very strong sustained buying pressure
+// Reliability: VERY HIGH bullish continuation/reversal
+function isThreeWhiteSoldiers(c1: OHLCV, c2: OHLCV, c3: OHLCV, avgBody: number): boolean {
+  return isBullish(c1) && isBullish(c2) && isBullish(c3) &&
+    c2.close > c1.close && c3.close > c2.close &&
+    c2.open > c1.open && c2.open < c1.close &&
+    c3.open > c2.open && c3.open < c2.close &&
+    bodySize(c1) > avgBody * 0.6 &&
+    bodySize(c2) > avgBody * 0.6 &&
+    bodySize(c3) > avgBody * 0.6 &&
+    upperWick(c1) < bodySize(c1) * 0.3 &&
+    upperWick(c2) < bodySize(c2) * 0.3 &&
+    upperWick(c3) < bodySize(c3) * 0.3;
+}
+
+// 13. THREE BLACK CROWS — Three consecutive bearish candles (opposite of Three White Soldiers)
+// Reliability: VERY HIGH bearish
+function isThreeBlackCrows(c1: OHLCV, c2: OHLCV, c3: OHLCV, avgBody: number): boolean {
+  return isBearish(c1) && isBearish(c2) && isBearish(c3) &&
+    c2.close < c1.close && c3.close < c2.close &&
+    c2.open < c1.open && c2.open > c1.close &&
+    c3.open < c2.open && c3.open > c2.close &&
+    bodySize(c1) > avgBody * 0.6 &&
+    bodySize(c2) > avgBody * 0.6 &&
+    bodySize(c3) > avgBody * 0.6 &&
+    lowerWick(c1) < bodySize(c1) * 0.3 &&
+    lowerWick(c2) < bodySize(c2) * 0.3 &&
+    lowerWick(c3) < bodySize(c3) * 0.3;
+}
+
+// 14. MARUBOZU — Full-body candle with no wicks (or very small)
+// Bullish Marubozu: Pure buying, opens at low, closes at high
+// Bearish Marubozu: Pure selling, opens at high, closes at low
+// Meaning: Very strong conviction in one direction
+function isMarubozu(c: OHLCV): boolean {
+  const range = candleRange(c);
+  if (range === 0) return false;
+  return bodySize(c) / range > 0.9;
+}
+
+// 15. HARAMI (Bullish) — Large bearish candle then small bullish candle inside its body
+// Meaning: Selling momentum fading, potential reversal
+function isBullishHarami(prev: OHLCV, current: OHLCV): boolean {
+  return isBearish(prev) && isBullish(current) &&
+    current.open >= prev.close && current.close <= prev.open &&
+    bodySize(current) < bodySize(prev) * 0.5;
+}
+
+// 16. HARAMI (Bearish) — Large bullish candle then small bearish candle inside
+function isBearishHarami(prev: OHLCV, current: OHLCV): boolean {
+  return isBullish(prev) && isBearish(current) &&
+    current.open <= prev.close && current.close >= prev.open &&
+    bodySize(current) < bodySize(prev) * 0.5;
+}
+
+// 17. PIERCING LINE — Bearish candle then bullish candle closing above midpoint of bearish
+function isPiercingLine(prev: OHLCV, current: OHLCV): boolean {
+  return isBearish(prev) && isBullish(current) &&
+    current.open < prev.low &&
+    current.close > bodyMidpoint(prev) &&
+    current.close < prev.open;
+}
+
+// 18. DARK CLOUD COVER — Bullish candle then bearish candle closing below midpoint
+function isDarkCloudCover(prev: OHLCV, current: OHLCV): boolean {
+  return isBullish(prev) && isBearish(current) &&
+    current.open > prev.high &&
+    current.close < bodyMidpoint(prev) &&
+    current.close > prev.open;
+}
+
+// 19. TWEEZER BOTTOM — Two candles with same or very close lows
+function isTweezerBottom(c1: OHLCV, c2: OHLCV): boolean {
+  const threshold = candleRange(c1) * 0.05;
+  return Math.abs(c1.low - c2.low) < threshold && isBearish(c1) && isBullish(c2);
+}
+
+// 20. TWEEZER TOP — Two candles with same or very close highs
+function isTweezerTop(c1: OHLCV, c2: OHLCV): boolean {
+  const threshold = candleRange(c1) * 0.05;
+  return Math.abs(c1.high - c2.high) < threshold && isBullish(c1) && isBearish(c2);
+}
+
+// 21. SPINNING TOP — Small body with roughly equal upper and lower wicks
+function isSpinningTop(c: OHLCV, avgBody: number): boolean {
+  const body = bodySize(c);
+  const uw = upperWick(c);
+  const lw = lowerWick(c);
+  return isSmallBody(c, avgBody) && uw > body * 0.8 && lw > body * 0.8;
+}
+
+// ═══════════════════════════════════════
+// MASTER CANDLE PATTERN SCANNER
+// ═══════════════════════════════════════
+
+export function detectAllCandlePatterns(candles: OHLCV[]): DetectedPattern[] {
+  const patterns: DetectedPattern[] = [];
+  const len = candles.length;
+  
+  if (len < 5) return patterns;
+  
+  const avgBody = getAverageBodySize(candles);
+  const lastIdx = len - 1;
+  const c = candles[lastIdx];     // Current candle
+  const p = candles[lastIdx - 1]; // Previous candle
+  
+  // Single candle patterns (on current candle)
+  if (isDragonflyDoji(c)) {
+    patterns.push({ name: 'Dragonfly Doji', type: 'bullish', reliability: 'medium',
+      description: 'Long lower wick doji — Sellers tried but buyers fought back completely. Bullish reversal when at support.',
+      position: lastIdx, category: 'candlestick' });
+  } else if (isGravestoneDoji(c)) {
+    patterns.push({ name: 'Gravestone Doji', type: 'bearish', reliability: 'medium',
+      description: 'Long upper wick doji — Buyers tried but sellers crushed the rally. Bearish reversal when at resistance.',
+      position: lastIdx, category: 'candlestick' });
+  } else if (isDoji(c)) {
+    patterns.push({ name: 'Doji', type: 'neutral', reliability: 'low',
+      description: 'Market indecision — Open equals Close. Wait for confirmation candle before trading.',
+      position: lastIdx, category: 'candlestick' });
+  }
+  
+  if (isMarubozu(c)) {
+    const type = isBullish(c) ? 'bullish' : 'bearish';
+    patterns.push({ name: `${isBullish(c) ? 'Bullish' : 'Bearish'} Marubozu`, type, reliability: 'high',
+      description: `Full body candle with no wicks — Extreme ${type} conviction. ${type === 'bullish' ? 'Strong buying' : 'Strong selling'} pressure with no pushback.`,
+      position: lastIdx, category: 'candlestick' });
+  }
+  
+  if (isShootingStar(c, candles, lastIdx, avgBody)) {
+    patterns.push({ name: 'Shooting Star', type: 'bearish', reliability: 'high',
+      description: 'Long upper wick after uptrend — Buyers attempted higher prices but sellers firmly rejected. Top reversal signal.',
+      position: lastIdx, category: 'candlestick' });
+  } else if (isHangingMan(c, candles, lastIdx, avgBody)) {
+    patterns.push({ name: 'Hanging Man', type: 'bearish', reliability: 'medium',
+      description: 'Hammer shape after uptrend — Selling pressure emerging at top. Bearish reversal warning.',
+      position: lastIdx, category: 'candlestick' });
+  } else if (isHammer(c, avgBody) && isDowntrend(candles.slice(0, lastIdx))) {
+    patterns.push({ name: 'Hammer', type: 'bullish', reliability: 'high',
+      description: 'Long lower wick after downtrend — Sellers pushed price down but buyers absorbed all selling and pushed back. Strong bottom reversal signal.',
+      position: lastIdx, category: 'candlestick' });
+  } else if (isInvertedHammer(c, avgBody) && isDowntrend(candles.slice(0, lastIdx))) {
+    patterns.push({ name: 'Inverted Hammer', type: 'bullish', reliability: 'medium',
+      description: 'Long upper wick after downtrend — Buying interest emerging. Needs bullish confirmation next candle.',
+      position: lastIdx, category: 'candlestick' });
+  }
+  
+  if (isSpinningTop(c, avgBody)) {
+    patterns.push({ name: 'Spinning Top', type: 'neutral', reliability: 'low',
+      description: 'Small body with equal wicks — Neither bulls nor bears dominated. Indecision, wait for next candle.',
+      position: lastIdx, category: 'candlestick' });
+  }
+  
+  // Two candle patterns (current + previous)
+  if (len >= 2) {
+    if (isBullishEngulfing(p, c)) {
+      patterns.push({ name: 'Bullish Engulfing', type: 'bullish', reliability: 'high',
+        description: 'Large bullish candle completely engulfs previous bearish candle — Buyers overwhelmed sellers with superior force. Strong reversal signal.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isBearishEngulfing(p, c)) {
+      patterns.push({ name: 'Bearish Engulfing', type: 'bearish', reliability: 'high',
+        description: 'Large bearish candle completely engulfs previous bullish candle — Sellers overwhelmed buyers. Strong top reversal signal.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isBullishHarami(p, c)) {
+      patterns.push({ name: 'Bullish Harami', type: 'bullish', reliability: 'medium',
+        description: 'Small bullish candle inside large bearish candle — Selling momentum is fading. Potential reversal if confirmed.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isBearishHarami(p, c)) {
+      patterns.push({ name: 'Bearish Harami', type: 'bearish', reliability: 'medium',
+        description: 'Small bearish candle inside large bullish candle — Buying momentum weakening. Watch for reversal.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isPiercingLine(p, c)) {
+      patterns.push({ name: 'Piercing Line', type: 'bullish', reliability: 'medium',
+        description: 'Bullish candle opens below low and closes above midpoint of bearish candle — Bulls fighting back strongly.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isDarkCloudCover(p, c)) {
+      patterns.push({ name: 'Dark Cloud Cover', type: 'bearish', reliability: 'medium',
+        description: 'Bearish candle opens above high and closes below midpoint of bullish candle — Bears taking control.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isTweezerBottom(p, c)) {
+      patterns.push({ name: 'Tweezer Bottom', type: 'bullish', reliability: 'medium',
+        description: 'Two candles with matching lows — Support level confirmed twice. Bullish reversal expected.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isTweezerTop(p, c)) {
+      patterns.push({ name: 'Tweezer Top', type: 'bearish', reliability: 'medium',
+        description: 'Two candles with matching highs — Resistance confirmed twice. Bearish reversal expected.',
+        position: lastIdx, category: 'candlestick' });
+    }
+  }
+  
+  // Three candle patterns
+  if (len >= 3) {
+    const pp = candles[lastIdx - 2];
+    if (isMorningStar(pp, p, c, avgBody)) {
+      patterns.push({ name: 'Morning Star', type: 'bullish', reliability: 'high',
+        description: 'Three-candle reversal pattern — Bearish→Small body→Bullish. Sellers exhausted, buyers seizing control. One of the most reliable bullish reversal patterns.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isEveningStar(pp, p, c, avgBody)) {
+      patterns.push({ name: 'Evening Star', type: 'bearish', reliability: 'high',
+        description: 'Three-candle reversal pattern — Bullish→Small body→Bearish. Buyers exhausted at top, sellers taking over. Very reliable bearish reversal.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isThreeWhiteSoldiers(pp, p, c, avgBody)) {
+      patterns.push({ name: 'Three White Soldiers', type: 'bullish', reliability: 'high',
+        description: 'Three consecutive large bullish candles with higher closes — Extremely strong and sustained buying pressure. Very reliable bullish signal.',
+        position: lastIdx, category: 'candlestick' });
+    }
+    if (isThreeBlackCrows(pp, p, c, avgBody)) {
+      patterns.push({ name: 'Three Black Crows', type: 'bearish', reliability: 'high',
+        description: 'Three consecutive large bearish candles with lower closes — Extremely strong sustained selling. Very reliable bearish signal.',
+        position: lastIdx, category: 'candlestick' });
+    }
+  }
+  
+  return patterns;
+}
+
+// ═══════════════════════════════════════
+// CHART PATTERN DETECTION
+// ═══════════════════════════════════════
+
+export function detectChartPatterns(candles: OHLCV[]): DetectedPattern[] {
+  const patterns: DetectedPattern[] = [];
+  const len = candles.length;
+  
+  if (len < 30) return patterns;
+  
+  const closes = candles.map(c => c.close);
+  const highs = candles.map(c => c.high);
+  const lows = candles.map(c => c.low);
+  const lastPrice = closes[len - 1];
+  
+  // DOUBLE BOTTOM — Two roughly equal lows with a peak between
+  {
+    const lookback = Math.min(60, len);
+    const segment = candles.slice(len - lookback);
+    const segLows = segment.map(c => c.low);
+    
+    // Find two lowest points
+    let min1 = Infinity, min1Idx = -1;
+    for (let i = 5; i < segLows.length - 5; i++) {
+      if (segLows[i] < min1) {
+        min1 = segLows[i];
+        min1Idx = i;
+      }
+    }
+    
+    let min2 = Infinity, min2Idx = -1;
+    for (let i = 5; i < segLows.length - 5; i++) {
+      if (i < min1Idx - 5 || i > min1Idx + 5) { // At least 5 bars apart
+        if (segLows[i] < min2) {
+          min2 = segLows[i];
+          min2Idx = i;
+        }
+      }
+    }
+    
+    if (min1Idx !== -1 && min2Idx !== -1) {
+      const tolerance = min1 * 0.02; // 2% tolerance
+      if (Math.abs(min1 - min2) < tolerance && Math.abs(min1Idx - min2Idx) >= 10) {
+        const neckline = Math.max(
+          ...segment.slice(Math.min(min1Idx, min2Idx), Math.max(min1Idx, min2Idx)).map(c => c.high)
+        );
+        if (lastPrice > (min1 + neckline) / 2) {
+          patterns.push({
+            name: 'Double Bottom',
+            type: 'bullish',
+            reliability: 'high',
+            description: `Two nearly equal lows at ₹${min1.toFixed(2)} forming a W-shape. Neckline at ₹${neckline.toFixed(2)}. Breakout above neckline confirms pattern. Target: ₹${(neckline + (neckline - min1)).toFixed(2)} (~${(((neckline - min1) / lastPrice) * 100).toFixed(1)}% upside). Classic reversal pattern with ~78% success rate.`,
+            position: len - 1,
+            category: 'chart'
+          });
+        }
+      }
+    }
+  }
+  
+  // DOUBLE TOP — Two roughly equal highs with a trough between
+  {
+    const lookback = Math.min(60, len);
+    const segment = candles.slice(len - lookback);
+    const segHighs = segment.map(c => c.high);
+    
+    let max1 = -Infinity, max1Idx = -1;
+    for (let i = 5; i < segHighs.length - 5; i++) {
+      if (segHighs[i] > max1) { max1 = segHighs[i]; max1Idx = i; }
+    }
+    
+    let max2 = -Infinity, max2Idx = -1;
+    for (let i = 5; i < segHighs.length - 5; i++) {
+      if (i < max1Idx - 5 || i > max1Idx + 5) {
+        if (segHighs[i] > max2) { max2 = segHighs[i]; max2Idx = i; }
+      }
+    }
+    
+    if (max1Idx !== -1 && max2Idx !== -1) {
+      const tolerance = max1 * 0.02;
+      if (Math.abs(max1 - max2) < tolerance && Math.abs(max1Idx - max2Idx) >= 10) {
+        patterns.push({
+          name: 'Double Top',
+          type: 'bearish',
+          reliability: 'high',
+          description: `Two nearly equal highs at ₹${max1.toFixed(2)} forming an M-shape. Price rejected twice at same level — Strong resistance confirmed. Bearish reversal expected with ~75% success rate.`,
+          position: len - 1,
+          category: 'chart'
+        });
+      }
+    }
+  }
+  
+  // ASCENDING TRIANGLE — Flat resistance top, rising support bottom
+  {
+    const lookback = Math.min(40, len);
+    const segment = candles.slice(len - lookback);
+    const segHighs = segment.map(c => c.high);
+    const segLows = segment.map(c => c.low);
+    
+    // Check if highs are roughly flat (resistance)
+    const highRange = Math.max(...segHighs) - Math.min(...segHighs);
+    const avgHigh = segHighs.reduce((a, b) => a + b) / segHighs.length;
+    const highFlatness = highRange / avgHigh;
+    
+    // Check if lows are rising
+    let risingLows = 0;
+    for (let i = 1; i < segLows.length; i++) {
+      if (segLows[i] >= segLows[i - 1] * 0.998) risingLows++;
+    }
+    const lowsRising = risingLows > segLows.length * 0.6;
+    
+    if (highFlatness < 0.03 && lowsRising) {
+      patterns.push({
+        name: 'Ascending Triangle',
+        type: 'bullish',
+        reliability: 'high',
+        description: `Flat resistance near ₹${avgHigh.toFixed(2)} with rising support — Buyers getting increasingly aggressive. Breakout above resistance likely. Pattern has ~75% chance of upward breakout. Measured target: ₹${(avgHigh + (avgHigh - Math.min(...segLows))).toFixed(2)}`,
+        position: len - 1,
+        category: 'chart'
+      });
+    }
+  }
+  
+  // DESCENDING TRIANGLE — Flat support, falling resistance
+  {
+    const lookback = Math.min(40, len);
+    const segment = candles.slice(len - lookback);
+    const segHighs = segment.map(c => c.high);
+    const segLows = segment.map(c => c.low);
+    
+    const lowRange = Math.max(...segLows) - Math.min(...segLows);
+    const avgLow = segLows.reduce((a, b) => a + b) / segLows.length;
+    const lowFlatness = lowRange / avgLow;
+    
+    let fallingHighs = 0;
+    for (let i = 1; i < segHighs.length; i++) {
+      if (segHighs[i] <= segHighs[i - 1] * 1.002) fallingHighs++;
+    }
+    const highsFalling = fallingHighs > segHighs.length * 0.6;
+    
+    if (lowFlatness < 0.03 && highsFalling) {
+      patterns.push({
+        name: 'Descending Triangle',
+        type: 'bearish',
+        reliability: 'high',
+        description: `Flat support near ₹${avgLow.toFixed(2)} with falling resistance — Sellers getting increasingly aggressive. Breakdown below support likely (~75% chance).`,
+        position: len - 1,
+        category: 'chart'
+      });
+    }
+  }
+  
+  // FALLING WEDGE (Bullish) — Both highs and lows falling, converging
+  {
+    const lookback = Math.min(30, len);
+    const segment = candles.slice(len - lookback);
+    const segHighs = segment.map(c => c.high);
+    const segLows = segment.map(c => c.low);
+    
+    // Check if both are falling
+    const highSlope = (segHighs[segHighs.length - 1] - segHighs[0]) / segHighs.length;
+    const lowSlope = (segLows[segLows.length - 1] - segLows[0]) / segLows.length;
+    
+    // Both falling but lows falling faster → wedge narrowing → bullish
+    if (highSlope < 0 && lowSlope < 0 && lowSlope < highSlope) {
+      const convergenceRate = Math.abs(highSlope - lowSlope);
+      if (convergenceRate > 0) {
+        patterns.push({
+          name: 'Falling Wedge',
+          type: 'bullish',
+          reliability: 'medium',
+          description: `Price narrowing between falling trendlines — Typically breaks UPWARD with ~68% probability. Measured move target: ₹${(lastPrice + (segHighs[0] - segLows[0])).toFixed(2)}. This is a bullish reversal pattern.`,
+          position: len - 1,
+          category: 'chart'
+        });
+      }
+    }
+  }
+  
+  // RISING WEDGE (Bearish) — Both highs and lows rising, converging
+  {
+    const lookback = Math.min(30, len);
+    const segment = candles.slice(len - lookback);
+    const segHighs = segment.map(c => c.high);
+    const segLows = segment.map(c => c.low);
+    
+    const highSlope = (segHighs[segHighs.length - 1] - segHighs[0]) / segHighs.length;
+    const lowSlope = (segLows[segLows.length - 1] - segLows[0]) / segLows.length;
+    
+    if (highSlope > 0 && lowSlope > 0 && highSlope < lowSlope) {
+      patterns.push({
+        name: 'Rising Wedge',
+        type: 'bearish',
+        reliability: 'medium',
+        description: `Price narrowing between rising trendlines — Bearish pattern that typically breaks downward with ~65% probability. Momentum weakening despite higher prices.`,
+        position: len - 1,
+        category: 'chart'
+      });
+    }
+  }
+  
+  // BULL FLAG — Sharp rise then slight downward consolidation
+  {
+    const lookback = Math.min(25, len);
+    const segment = candles.slice(len - lookback);
+    
+    // Check for strong initial move up (pole)
+    const firstHalf = segment.slice(0, Math.floor(lookback / 2));
+    const poleMove = (firstHalf[firstHalf.length - 1].close - firstHalf[0].close) / firstHalf[0].close;
+    
+    // Check for slight pullback (flag)
+    const secondHalf = segment.slice(Math.floor(lookback / 2));
+    const flagMove = (secondHalf[secondHalf.length - 1].close - secondHalf[0].close) / secondHalf[0].close;
+    
+    if (poleMove > 0.03 && flagMove < 0 && Math.abs(flagMove) < poleMove * 0.5) {
+      patterns.push({
+        name: 'Bull Flag',
+        type: 'bullish',
+        reliability: 'high',
+        description: `Strong upward move (+${(poleMove * 100).toFixed(1)}%) followed by slight pullback (${(flagMove * 100).toFixed(1)}%) — Bullish continuation pattern. Expect another leg up equal to the pole. Target: ₹${(lastPrice * (1 + poleMove)).toFixed(2)}. Success rate: ~70%.`,
+        position: len - 1,
+        category: 'chart'
+      });
+    }
+  }
+  
+  // BEAR FLAG
+  {
+    const lookback = Math.min(25, len);
+    const segment = candles.slice(len - lookback);
+    
+    const firstHalf = segment.slice(0, Math.floor(lookback / 2));
+    const poleMove = (firstHalf[firstHalf.length - 1].close - firstHalf[0].close) / firstHalf[0].close;
+    
+    const secondHalf = segment.slice(Math.floor(lookback / 2));
+    const flagMove = (secondHalf[secondHalf.length - 1].close - secondHalf[0].close) / secondHalf[0].close;
+    
+    if (poleMove < -0.03 && flagMove > 0 && flagMove < Math.abs(poleMove) * 0.5) {
+      patterns.push({
+        name: 'Bear Flag',
+        type: 'bearish',
+        reliability: 'high',
+        description: `Strong downward move (${(poleMove * 100).toFixed(1)}%) followed by slight bounce (+${(flagMove * 100).toFixed(1)}%) — Bearish continuation. Expect another leg down.`,
+        position: len - 1,
+        category: 'chart'
+      });
+    }
+  }
+  
+  return patterns;
+}
+
+// ═══════════════════════════════════════
+// MASTER PATTERN DETECTOR
+// ═══════════════════════════════════════
+export function detectAllPatterns(candles: OHLCV[]): DetectedPattern[] {
+  return [
+    ...detectAllCandlePatterns(candles),
+    ...detectChartPatterns(candles),
+  ];
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// TradeSignal Pro — CORE SIGNAL GENERATION ENGINE
+// Multi-Indicator Confluence Scoring System
+// This is the BRAIN that decides BUY or SELL
+// Made with ❤️ by Shahrukh
+// ═══════════════════════════════════════════════════════════
+
+import {
+  OHLCV, SMA, EMA, RSI, MACD, BollingerBands, Stochastic, ATR,
+  Supertrend, ADX, VWAP, OBV, CCI, WilliamsR, MFI, ParabolicSAR,
+  calculatePivotPoints, findSupportResistance, detectRSIDivergence,
+  analyzeVolume, findSwingLow, findSwingHigh
+} from './indicators';
+
+import { detectAllPatterns, DetectedPattern } from './patterns';
+
+// ═══════════════════════════════════════
+// SIGNAL OUTPUT TYPES
+// ═══════════════════════════════════════
+
+export type SignalType = 'STRONG_BUY' | 'BUY' | 'WEAK_BUY' | 'NEUTRAL' | 'WEAK_SELL' | 'SELL' | 'STRONG_SELL';
+
+export interface SignalReason {
+  indicator: string;
+  value: string;
+  interpretation: string;
+  type: 'bullish' | 'bearish' | 'neutral';
+  score: number;
+  icon: string;
+}
+
+export interface TradeSetup {
+  entry: number;
+  stopLoss: number;
+  target1: number;
+  target2: number;
+  target3: number;
+  riskPerShare: number;
+  rewardPerShare: number;
+  riskRewardRatio: number;
+  positionSizeForRisk: (capitalRiskAmount: number) => number;
+}
+
+export interface AllIndicatorValues {
+  rsi: number;
+  macd: { line: number; signal: number; histogram: number; crossover: string };
+  ema9: number;
+  ema21: number;
+  ema50: number;
+  ema200: number;
+  sma20: number;
+  sma50: number;
+  sma200: number;
+  supertrend: { signal: string; value: number };
+  bollinger: { upper: number; middle: number; lower: number; percentB: number; bandwidth: number };
+  stochastic: { k: number; d: number };
+  adx: { adx: number; plusDI: number; minusDI: number };
+  atr: number;
+  vwap: number;
+  obv: number;
+  cci: number;
+  williamsR: number;
+  mfi: number;
+  parabolicSar: { value: number; signal: string };
+  volume: { current: number; average: number; ratio: number; trend: string };
+  pivots: { pivot: number; r1: number; r2: number; r3: number; s1: number; s2: number; s3: number };
+  supports: number[];
+  resistances: number[];
+}
+
+export interface LiveSignal {
+  // Identity
+  id: string;
+  symbol: string;
+  stockName: string;
+  exchange: string;
+  timeframe: string;
+  timestamp: number;
+  
+  // Signal
+  signal: SignalType;
+  signalEmoji: string;
+  score: number;
+  maxPossibleScore: number;
+  confidence: number;         // 0-100%
+  
+  // Trade Setup
+  currentPrice: number;
+  tradeSetup: TradeSetup;
+  
+  // Analysis
+  reasons: SignalReason[];
+  bullishReasons: SignalReason[];
+  bearishReasons: SignalReason[];
+  neutralReasons: SignalReason[];
+  
+  // Patterns
+  detectedPatterns: DetectedPattern[];
+  candlePatterns: DetectedPattern[];
+  chartPatterns: DetectedPattern[];
+  
+  // Indicators
+  indicators: AllIndicatorValues;
+  
+  // Volume
+  volumeAnalysis: string;
+  
+  // Divergence
+  rsiDivergence: string;
+  
+  // Overall
+  trendDirection: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS';
+  trendStrength: 'STRONG' | 'MODERATE' | 'WEAK';
+  summary: string;
+  
+  // Meta
+  status: 'active' | 'target_hit' | 'sl_hit' | 'expired';
+}
+
+// ═══════════════════════════════════════
+// MAIN SIGNAL GENERATOR
+// ═══════════════════════════════════════
+
+export function generateLiveSignal(
+  candles: OHLCV[],
+  symbol: string,
+  stockName: string,
+  exchange: string = 'NSE',
+  timeframe: string = '15m'
+): LiveSignal {
+  
+  const len = candles.length;
+  const currentCandle = candles[len - 1];
+  const prevCandle = candles[len - 2];
+  const currentPrice = currentCandle.close;
+  
+  // Extract price arrays
+  const closes = candles.map(c => c.close);
+  const highs = candles.map(c => c.high);
+  const lows = candles.map(c => c.low);
+  const volumes = candles.map(c => c.volume);
+  const opens = candles.map(c => c.open);
+  
+  // ═══════════════════════════════════════
+  // STEP 1: CALCULATE ALL INDICATORS
+  // ═══════════════════════════════════════
+  
+  const ema9Values = EMA(closes, 9);
+  const ema21Values = EMA(closes, 21);
+  const ema50Values = EMA(closes, 50);
+  const ema200Values = EMA(closes, 200);
+  const sma20Values = SMA(closes, 20);
+  const sma50Values = SMA(closes, 50);
+  const sma200Values = SMA(closes, 200);
+  const rsiValues = RSI(closes, 14);
+  const macdResult = MACD(closes, 12, 26, 9);
+  const bbResult = BollingerBands(closes, 20, 2);
+  const stochResult = Stochastic(highs, lows, closes, 14, 3, 3);
+  const atrValues = ATR(highs, lows, closes, 14);
+  const supertrendResult = Supertrend(highs, lows, closes, 10, 3);
+  const adxResult = ADX(highs, lows, closes, 14);
+  const vwapValues = VWAP(highs, lows, closes, volumes);
+  const obvValues = OBV(closes, volumes);
+  const cciValues = CCI(highs, lows, closes, 20);
+  const williamsRValues = WilliamsR(highs, lows, closes, 14);
+  const mfiValues = MFI(highs, lows, closes, volumes, 14);
+  const psarResult = ParabolicSAR(highs, lows, closes);
+  
+  // Get latest values
+  const last = (arr: number[]): number => {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (!isNaN(arr[i])) return arr[i];
+    }
+    return 0;
+  };
+  
+  const prevLast = (arr: number[]): number => {
+    let count = 0;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (!isNaN(arr[i])) {
+        count++;
+        if (count === 2) return arr[i];
+      }
+    }
+    return 0;
+  };
+  
+  const ema9 = last(ema9Values);
+  const ema21 = last(ema21Values);
+  const ema50 = last(ema50Values);
+  const ema200 = last(ema200Values);
+  const sma20 = last(sma20Values);
+  const sma50 = last(sma50Values);
+  const sma200 = last(sma200Values);
+  const rsi = last(rsiValues);
+  const macdLine = last(macdResult.macdLine);
+  const macdSignal = last(macdResult.signalLine);
+  const macdHist = last(macdResult.histogram);
+  const prevMacdLine = prevLast(macdResult.macdLine);
+  const prevMacdSignal = prevLast(macdResult.signalLine);
+  const prevMacdHist = prevLast(macdResult.histogram);
+  const bbUpper = last(bbResult.upper);
+  const bbMiddle = last(bbResult.middle);
+  const bbLower = last(bbResult.lower);
+  const bbPercentB = last(bbResult.percentB);
+  const bbBandwidth = last(bbResult.bandwidth);
+  const stochK = last(stochResult.k);
+  const stochD = last(stochResult.d);
+  const prevStochK = prevLast(stochResult.k);
+  const prevStochD = prevLast(stochResult.d);
+  const atr = last(atrValues);
+  const stSignal = supertrendResult.signal[len - 1] || 'NEUTRAL';
+  const stValue = last(supertrendResult.value);
+  const adxVal = last(adxResult.adx);
+  const plusDI = last(adxResult.plusDI);
+  const minusDI = last(adxResult.minusDI);
+  const vwap = last(vwapValues);
+  const obv = last(obvValues);
+  const cci = last(cciValues);
+  const williamsR = last(williamsRValues);
+  const mfi = last(mfiValues);
+  const psarValue = last(psarResult.value);
+  const psarSignal = psarResult.signal[len - 1] || 'NEUTRAL';
+  
+  // MACD crossover detection
+  let macdCrossover = 'NONE';
+  if (prevMacdLine <= prevMacdSignal && macdLine > macdSignal) {
+    macdCrossover = 'BULLISH_CROSSOVER';
+  } else if (prevMacdLine >= prevMacdSignal && macdLine < macdSignal) {
+    macdCrossover = 'BEARISH_CROSSOVER';
+  }
+  
+  // Volume analysis
+  const volAnalysis = analyzeVolume(candles, 20);
+  
+  // Support & Resistance
+  const { supports, resistances } = findSupportResistance(candles, 50);
+  
+  // Pivot Points
+  const dayHigh = candles.slice(-20).reduce((max, c) => Math.max(max, c.high), -Infinity);
+  const dayLow = candles.slice(-20).reduce((min, c) => Math.min(min, c.low), Infinity);
+  const pivots = calculatePivotPoints(dayHigh, dayLow, currentPrice);
+  
+  // RSI Divergence
+  const divergence = detectRSIDivergence(closes, rsiValues, 20);
+  
+  // Pattern Detection
+  const allPatterns = detectAllPatterns(candles);
+  const candlePats = allPatterns.filter(p => p.category === 'candlestick');
+  const chartPats = allPatterns.filter(p => p.category === 'chart');
+  
+  // ═══════════════════════════════════════
+  // STEP 2: MULTI-INDICATOR SCORING
+  // ═══════════════════════════════════════
+  
+  let score = 0;
+  const reasons: SignalReason[] = [];
+  
+  // ─── EMA ANALYSIS (Max ±8 points) ───
+  
+  if (ema9 > ema21) {
+    score += 1;
+    reasons.push({ indicator: 'EMA 9/21', value: `${ema9.toFixed(2)} > ${ema21.toFixed(2)}`, interpretation: 'EMA 9 above EMA 21 — Short-term momentum is bullish', type: 'bullish', score: 1, icon: '✅' });
+  } else if (ema9 < ema21) {
+    score -= 1;
+    reasons.push({ indicator: 'EMA 9/21', value: `${ema9.toFixed(2)} < ${ema21.toFixed(2)}`, interpretation: 'EMA 9 below EMA 21 — Short-term momentum is bearish', type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  if (ema21 > ema50) {
+    score += 1;
+    reasons.push({ indicator: 'EMA 21/50', value: `${ema21.toFixed(2)} > ${ema50.toFixed(2)}`, interpretation: 'EMA 21 above EMA 50 — Medium-term trend is bullish', type: 'bullish', score: 1, icon: '✅' });
+  } else if (ema21 < ema50) {
+    score -= 1;
+    reasons.push({ indicator: 'EMA 21/50', value: `${ema21.toFixed(2)} < ${ema50.toFixed(2)}`, interpretation: 'EMA 21 below EMA 50 — Medium-term trend is bearish', type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  if (ema50 > 0 && ema200 > 0) {
+    if (ema50 > ema200) {
+      score += 2;
+      reasons.push({ indicator: 'Golden Cross Zone', value: `EMA50 ${ema50.toFixed(2)} > EMA200 ${ema200.toFixed(2)}`, interpretation: 'EMA 50 above EMA 200 — GOLDEN CROSS zone. Long-term bull market structure. Historically very bullish.', type: 'bullish', score: 2, icon: '✅' });
+    } else {
+      score -= 2;
+      reasons.push({ indicator: 'Death Cross Zone', value: `EMA50 ${ema50.toFixed(2)} < EMA200 ${ema200.toFixed(2)}`, interpretation: 'EMA 50 below EMA 200 — DEATH CROSS zone. Long-term bear market structure.', type: 'bearish', score: -2, icon: '❌' });
+    }
+  }
+  
+  if (currentPrice > ema20 && ema20 > 0) {
+    score += 1;
+    reasons.push({ indicator: 'Price vs EMA 20', value: `₹${currentPrice.toFixed(2)} > ₹${sma20.toFixed(2)}`, interpretation: 'Price above 20 EMA — Immediate trend bullish. Price has short-term support.', type: 'bullish', score: 1, icon: '✅' });
+  } else if (sma20 > 0) {
+    score -= 1;
+    reasons.push({ indicator: 'Price vs EMA 20', value: `₹${currentPrice.toFixed(2)} < ₹${sma20.toFixed(2)}`, interpretation: 'Price below 20 EMA — Immediate trend bearish.', type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  if (currentPrice > ema200 && ema200 > 0) {
+    score += 2;
+    reasons.push({ indicator: 'Price vs 200 EMA', value: `₹${currentPrice.toFixed(2)} > ₹${ema200.toFixed(2)}`, interpretation: 'Price above 200 EMA — Major uptrend intact. Institutional support present.', type: 'bullish', score: 2, icon: '✅' });
+  } else if (ema200 > 0) {
+    score -= 2;
+    reasons.push({ indicator: 'Price vs 200 EMA', value: `₹${currentPrice.toFixed(2)} < ₹${ema200.toFixed(2)}`, interpretation: 'Price below 200 EMA — Major downtrend. Avoid long positions until reclaimed.', type: 'bearish', score: -2, icon: '❌' });
+  }
+  
+  // ─── MACD ANALYSIS (Max ±5 points) ───
+  
+  if (macdCrossover === 'BULLISH_CROSSOVER') {
+    score += 3;
+    reasons.push({ indicator: 'MACD Crossover', value: `MACD ${macdLine.toFixed(3)} crossed above Signal ${macdSignal.toFixed(3)}`, interpretation: 'BULLISH MACD CROSSOVER! MACD line just crossed above signal line — Strong momentum shift from bearish to bullish. One of the most reliable buy signals.', type: 'bullish', score: 3, icon: '✅' });
+  } else if (macdCrossover === 'BEARISH_CROSSOVER') {
+    score -= 3;
+    reasons.push({ indicator: 'MACD Crossover', value: `MACD ${macdLine.toFixed(3)} crossed below Signal ${macdSignal.toFixed(3)}`, interpretation: 'BEARISH MACD CROSSOVER! MACD line crossed below signal line — Momentum shifting from bullish to bearish. Strong sell signal.', type: 'bearish', score: -3, icon: '❌' });
+  }
+  
+  if (macdHist > 0 && macdHist > prevMacdHist) {
+    score += 1;
+    reasons.push({ indicator: 'MACD Histogram', value: `${macdHist.toFixed(3)} (increasing)`, interpretation: 'MACD Histogram growing positive — Bullish momentum is accelerating.', type: 'bullish', score: 1, icon: '✅' });
+  } else if (macdHist < 0 && macdHist < prevMacdHist) {
+    score -= 1;
+    reasons.push({ indicator: 'MACD Histogram', value: `${macdHist.toFixed(3)} (decreasing)`, interpretation: 'MACD Histogram growing negative — Bearish momentum intensifying.', type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  if (macdLine > 0 && macdSignal > 0) {
+    score += 1;
+    reasons.push({ indicator: 'MACD Position', value: `Both above zero line`, interpretation: 'Both MACD and Signal above zero — Confirmed bullish territory.', type: 'bullish', score: 1, icon: '✅' });
+  } else if (macdLine < 0 && macdSignal < 0) {
+    score -= 1;
+    reasons.push({ indicator: 'MACD Position', value: `Both below zero line`, interpretation: 'Both MACD and Signal below zero — Confirmed bearish territory.', type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  // ─── RSI ANALYSIS (Max ±5 points) ───
+  
+  if (rsi < 25) {
+    score += 3;
+    reasons.push({ indicator: 'RSI', value: `${rsi.toFixed(1)}`, interpretation: `RSI at ${rsi.toFixed(1)} — DEEPLY OVERSOLD! Extreme selling exhaustion. Very high probability of bounce. This level historically precedes strong rallies.`, type: 'bullish', score: 3, icon: '✅' });
+  } else if (rsi < 30) {
+    score += 2;
+    reasons.push({ indicator: 'RSI', value: `${rsi.toFixed(1)}`, interpretation: `RSI at ${rsi.toFixed(1)} — Oversold zone. Selling pressure likely exhausted. Bounce expected. Good risk-reward for buying.`, type: 'bullish', score: 2, icon: '✅' });
+  } else if (rsi < 40) {
+    score += 1;
+    reasons.push({ indicator: 'RSI', value: `${rsi.toFixed(1)}`, interpretation: `RSI at ${rsi.toFixed(1)} — Approaching oversold. Momentum weakening. May be approaching a buying opportunity.`, type: 'bullish', score: 1, icon: '✅' });
+  } else if (rsi > 80) {
+    score -= 3;
+    reasons.push({ indicator: 'RSI', value: `${rsi.toFixed(1)}`, interpretation: `RSI at ${rsi.toFixed(1)} — EXTREMELY OVERBOUGHT! Unsustainable buying. Pullback or correction imminent. Very risky to buy here.`, type: 'bearish', score: -3, icon: '❌' });
+  } else if (rsi > 70) {
+    score -= 2;
+    reasons.push({ indicator: 'RSI', value: `${rsi.toFixed(1)}`, interpretation: `RSI at ${rsi.toFixed(1)} — Overbought zone. Buying momentum overextended. Consider taking profits or avoid new longs.`, type: 'bearish', score: -2, icon: '❌' });
+  } else if (rsi > 60) {
+    score -= 1;
+    reasons.push({ indicator: 'RSI', value: `${rsi.toFixed(1)}`, interpretation: `RSI at ${rsi.toFixed(1)} — Approaching overbought. Momentum still bullish but slowing.`, type: 'bearish', score: -1, icon: '⚠️' });
+  } else {
+    reasons.push({ indicator: 'RSI', value: `${rsi.toFixed(1)}`, interpretation: `RSI at ${rsi.toFixed(1)} — Neutral zone. No extreme reading.`, type: 'neutral', score: 0, icon: '⚪' });
+  }
+  
+  // RSI Divergence (Max ±3 points)
+  if (divergence.bullishDivergence) {
+    score += 3;
+    reasons.push({ indicator: 'RSI Divergence', value: 'Bullish Divergence', interpretation: divergence.description, type: 'bullish', score: 3, icon: '✅' });
+  }
+  if (divergence.bearishDivergence) {
+    score -= 3;
+    reasons.push({ indicator: 'RSI Divergence', value: 'Bearish Divergence', interpretation: divergence.description, type: 'bearish', score: -3, icon: '❌' });
+  }
+  
+  // ─── SUPERTREND (Max ±2 points) ───
+  
+  if (stSignal === 'BUY') {
+    score += 2;
+    reasons.push({ indicator: 'Supertrend', value: `BUY at ₹${stValue.toFixed(2)}`, interpretation: `Supertrend is GREEN (bullish) at ₹${stValue.toFixed(2)} — Price is in an uptrend with support at supertrend level.`, type: 'bullish', score: 2, icon: '✅' });
+  } else if (stSignal === 'SELL') {
+    score -= 2;
+    reasons.push({ indicator: 'Supertrend', value: `SELL at ₹${stValue.toFixed(2)}`, interpretation: `Supertrend is RED (bearish) at ₹${stValue.toFixed(2)} — Price is in a downtrend with resistance at supertrend level.`, type: 'bearish', score: -2, icon: '❌' });
+  }
+  
+  // ─── STOCHASTIC (Max ±2 points) ───
+  
+  if (stochK < 20 && stochK > stochD && prevStochK <= prevStochD) {
+    score += 2;
+    reasons.push({ indicator: 'Stochastic', value: `%K=${stochK.toFixed(1)}, %D=${stochD.toFixed(1)}`, interpretation: `Stochastic BULLISH crossover in OVERSOLD zone! %K crossed above %D below 20. This is one of the strongest momentum buy signals.`, type: 'bullish', score: 2, icon: '✅' });
+  } else if (stochK > 80 && stochK < stochD && prevStochK >= prevStochD) {
+    score -= 2;
+    reasons.push({ indicator: 'Stochastic', value: `%K=${stochK.toFixed(1)}, %D=${stochD.toFixed(1)}`, interpretation: `Stochastic BEARISH crossover in OVERBOUGHT zone! %K crossed below %D above 80. Strong sell signal.`, type: 'bearish', score: -2, icon: '❌' });
+  } else if (stochK < 20) {
+    score += 1;
+    reasons.push({ indicator: 'Stochastic', value: `%K=${stochK.toFixed(1)}`, interpretation: `Stochastic in oversold zone — Bounce potential building.`, type: 'bullish', score: 1, icon: '✅' });
+  } else if (stochK > 80) {
+    score -= 1;
+    reasons.push({ indicator: 'Stochastic', value: `%K=${stochK.toFixed(1)}`, interpretation: `Stochastic in overbought zone — Pullback risk elevated.`, type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  // ─── BOLLINGER BANDS (Max ±2 points) ───
+  
+  if (bbPercentB <= 0.05) {
+    score += 2;
+    reasons.push({ indicator: 'Bollinger Bands', value: `Price at lower band (₹${bbLower.toFixed(2)})`, interpretation: `Price touching LOWER Bollinger Band — Mean reversion bounce expected. Price at 2 standard deviations below average, statistically likely to revert.`, type: 'bullish', score: 2, icon: '✅' });
+  } else if (bbPercentB >= 0.95) {
+    score -= 2;
+    reasons.push({ indicator: 'Bollinger Bands', value: `Price at upper band (₹${bbUpper.toFixed(2)})`, interpretation: `Price touching UPPER Bollinger Band — Mean reversion pullback expected. Price at 2 standard deviations above average.`, type: 'bearish', score: -2, icon: '❌' });
+  }
+  
+  if (bbBandwidth < 3) {
+    reasons.push({ indicator: 'BB Squeeze', value: `Bandwidth: ${bbBandwidth.toFixed(2)}%`, interpretation: `Bollinger Band SQUEEZE detected! Bands are very narrow — Volatility is extremely low. A BIG move is imminent. Direction TBD, but prepare for breakout.`, type: 'neutral', score: 0, icon: '⚠️' });
+  }
+  
+  // ─── VOLUME ANALYSIS (Max ±3 points) ───
+  
+  const currentCandleBullish = currentCandle.close > currentCandle.open;
+  
+  if (volAnalysis.isVolumeSpike) {
+    if (currentCandleBullish) {
+      score += 2;
+      reasons.push({ indicator: 'Volume Spike', value: `${volAnalysis.volumeRatio.toFixed(1)}x average`, interpretation: `VOLUME SPIKE ${volAnalysis.volumeRatio.toFixed(1)}x with BULLISH candle — Massive buying interest. Smart money likely entering. Very strong confirmation.`, type: 'bullish', score: 2, icon: '✅' });
+    } else {
+      score -= 2;
+      reasons.push({ indicator: 'Volume Spike', value: `${volAnalysis.volumeRatio.toFixed(1)}x average`, interpretation: `VOLUME SPIKE ${volAnalysis.volumeRatio.toFixed(1)}x with BEARISH candle — Heavy selling pressure. Possible panic or institutional distribution.`, type: 'bearish', score: -2, icon: '❌' });
+    }
+  } else if (volAnalysis.isHighVolume) {
+    score += currentCandleBullish ? 1 : -1;
+    const type = currentCandleBullish ? 'bullish' : 'bearish';
+    reasons.push({ indicator: 'Volume', value: `${volAnalysis.volumeRatio.toFixed(1)}x average`, interpretation: `Above average volume (${volAnalysis.volumeRatio.toFixed(1)}x) — Confirms ${currentCandleBullish ? 'buying' : 'selling'} conviction. ${volAnalysis.description}`, type, score: currentCandleBullish ? 1 : -1, icon: currentCandleBullish ? '✅' : '❌' });
+  } else if (volAnalysis.isLowVolume) {
+    reasons.push({ indicator: 'Volume', value: `${volAnalysis.volumeRatio.toFixed(1)}x average`, interpretation: `LOW volume (${volAnalysis.volumeRatio.toFixed(1)}x average) — Weak conviction. Current move may not sustain. Wait for volume confirmation.`, type: 'neutral', score: 0, icon: '⚠️' });
+  }
+  
+  // ─── VWAP (Max ±1 point) ───
+  
+  if (currentPrice > vwap && vwap > 0) {
+    score += 1;
+    reasons.push({ indicator: 'VWAP', value: `Price ₹${currentPrice.toFixed(2)} > VWAP ₹${vwap.toFixed(2)}`, interpretation: 'Price above VWAP — Bullish intraday bias. Buyers are willing to pay above average price.', type: 'bullish', score: 1, icon: '✅' });
+  } else if (vwap > 0) {
+    score -= 1;
+    reasons.push({ indicator: 'VWAP', value: `Price ₹${currentPrice.toFixed(2)} < VWAP ₹${vwap.toFixed(2)}`, interpretation: 'Price below VWAP — Bearish intraday bias. Sellers dominating.', type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  // ─── MFI (Max ±2 points) ───
+  
+  if (mfi < 20) {
+    score += 2;
+    reasons.push({ indicator: 'MFI', value: `${mfi.toFixed(1)}`, interpretation: `Money Flow Index at ${mfi.toFixed(1)} — OVERSOLD with volume confirmation. Money flowing into oversold territory. Stronger signal than RSI alone because it includes volume.`, type: 'bullish', score: 2, icon: '✅' });
+  } else if (mfi > 80) {
+    score -= 2;
+    reasons.push({ indicator: 'MFI', value: `${mfi.toFixed(1)}`, interpretation: `Money Flow Index at ${mfi.toFixed(1)} — OVERBOUGHT with volume confirmation. Unsustainable money flow.`, type: 'bearish', score: -2, icon: '❌' });
+  }
+  
+  // ─── CCI (Max ±1 point) ───
+  
+  if (cci < -100) {
+    score += 1;
+    reasons.push({ indicator: 'CCI', value: `${cci.toFixed(1)}`, interpretation: `CCI at ${cci.toFixed(1)} — Oversold territory. Price significantly below statistical norm.`, type: 'bullish', score: 1, icon: '✅' });
+  } else if (cci > 100) {
+    score -= 1;
+    reasons.push({ indicator: 'CCI', value: `${cci.toFixed(1)}`, interpretation: `CCI at ${cci.toFixed(1)} — Overbought territory. Price significantly above statistical norm.`, type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  // ─── ADX (Max ±1 point for direction, trend strength info) ───
+  
+  if (adxVal > 25 && plusDI > minusDI) {
+    score += 1;
+    reasons.push({ indicator: 'ADX', value: `ADX=${adxVal.toFixed(1)}, +DI=${plusDI.toFixed(1)} > -DI=${minusDI.toFixed(1)}`, interpretation: `Strong BULLISH trend confirmed. ADX above 25 with +DI dominant — Trade with the uptrend.`, type: 'bullish', score: 1, icon: '✅' });
+  } else if (adxVal > 25 && minusDI > plusDI) {
+    score -= 1;
+    reasons.push({ indicator: 'ADX', value: `ADX=${adxVal.toFixed(1)}, -DI=${minusDI.toFixed(1)} > +DI=${plusDI.toFixed(1)}`, interpretation: `Strong BEARISH trend confirmed. ADX above 25 with -DI dominant — Trade with the downtrend.`, type: 'bearish', score: -1, icon: '❌' });
+  } else if (adxVal < 20) {
+    reasons.push({ indicator: 'ADX', value: `${adxVal.toFixed(1)}`, interpretation: `ADX at ${adxVal.toFixed(1)} — NO clear trend. Market is ranging/sideways. Trend-following strategies may give false signals.`, type: 'neutral', score: 0, icon: '⚠️' });
+  }
+  
+  // ─── PARABOLIC SAR (Max ±1 point) ───
+  
+  if (psarSignal === 'BUY') {
+    score += 1;
+    reasons.push({ indicator: 'Parabolic SAR', value: `BUY (SAR at ₹${psarValue.toFixed(2)})`, interpretation: `SAR dots below price — Uptrend. Trail stop at ₹${psarValue.toFixed(2)}.`, type: 'bullish', score: 1, icon: '✅' });
+  } else if (psarSignal === 'SELL') {
+    score -= 1;
+    reasons.push({ indicator: 'Parabolic SAR', value: `SELL (SAR at ₹${psarValue.toFixed(2)})`, interpretation: `SAR dots above price — Downtrend. Resistance at ₹${psarValue.toFixed(2)}.`, type: 'bearish', score: -1, icon: '❌' });
+  }
+  
+  // ─── SUPPORT & RESISTANCE (Max ±3 points) ───
+  
+  const nearestSupport = supports[0] || 0;
+  const nearestResistance = resistances[0] || Infinity;
+  
+  if (nearestSupport > 0 && Math.abs(currentPrice - nearestSupport) / currentPrice < 0.01) {
+    score += 2;
+    reasons.push({ indicator: 'Support Level', value: `₹${nearestSupport.toFixed(2)}`, interpretation: `Price AT strong support level ₹${nearestSupport.toFixed(2)} — This level has held multiple times before. Bounce expected. Good risk-reward entry.`, type: 'bullish', score: 2, icon: '✅' });
+  } else if (currentPrice < nearestSupport * 0.99) {
+    score -= 3;
+    reasons.push({ indicator: 'Support Break', value: `Below ₹${nearestSupport.toFixed(2)}`, interpretation: `BREAKDOWN below support ₹${nearestSupport.toFixed(2)}! Previous support now becomes resistance. Bearish breakdown confirmed.`, type: 'bearish', score: -3, icon: '❌' });
+  }
+  
+  if (nearestResistance < Infinity && Math.abs(currentPrice - nearestResistance) / currentPrice < 0.01) {
+    score -= 1;
+    reasons.push({ indicator: 'Resistance Level', value: `₹${nearestResistance.toFixed(2)}`, interpretation: `Price near resistance ₹${nearestResistance.toFixed(2)} — May face rejection. Watch for breakout or pullback.`, type: 'bearish', score: -1, icon: '⚠️' });
+  } else if (currentPrice > nearestResistance * 1.01 && nearestResistance > 0) {
+    score += 3;
+    reasons.push({ indicator: 'Resistance Break', value: `Above ₹${nearestResistance.toFixed(2)}`, interpretation: `BREAKOUT above resistance ₹${nearestResistance.toFixed(2)}! Previous resistance now support. Bullish breakout confirmed. New highs possible.`, type: 'bullish', score: 3, icon: '✅' });
+  }
+  
+  // ─── CANDLESTICK PATTERNS (Max ±3 points each) ───
+  
+  for (const pattern of candlePats) {
+    let patternScore = 0;
+    if (pattern.reliability === 'high') {
+      patternScore = pattern.type === 'bullish' ? 3 : pattern.type === 'bearish' ? -3 : 0;
+    } else if (pattern.reliability === 'medium') {
+      patternScore = pattern.type === 'bullish' ? 2 : pattern.type === 'bearish' ? -2 : 0;
+    } else {
+      patternScore = pattern.type === 'bullish' ? 1 : pattern.type === 'bearish' ? -1 : 0;
+    }
+    score += patternScore;
+    reasons.push({
+      indicator: `Candle: ${pattern.name}`,
+      value: `${pattern.type} (${pattern.reliability} reliability)`,
+      interpretation: pattern.description,
+      type: pattern.type,
+      score: patternScore,
+      icon: pattern.type === 'bullish' ? '🕯️✅' : pattern.type === 'bearish' ? '🕯️❌' : '🕯️⚪'
+    });
+  }
+  
+  // ─── CHART PATTERNS (Max ±3 points each) ───
+  
+  for (const pattern of chartPats) {
+    let patternScore = 0;
+    if (pattern.reliability === 'high') {
+      patternScore = pattern.type === 'bullish' ? 3 : pattern.type === 'bearish' ? -3 : 0;
+    } else {
+      patternScore = pattern.type === 'bullish' ? 2 : pattern.type === 'bearish' ? -2 : 0;
+    }
+    score += patternScore;
+    reasons.push({
+      indicator: `Chart: ${pattern.name}`,
+      value: `${pattern.type} pattern`,
+      interpretation: pattern.description,
+      type: pattern.type,
+      score: patternScore,
+      icon: pattern.type === 'bullish' ? '📐✅' : pattern.type === 'bearish' ? '📐❌' : '📐⚪'
+    });
+  }
+  
+  // ═══════════════════════════════════════
+  // STEP 3: CLASSIFY SIGNAL
+  // ═══════════════════════════════════════
+  
+  let signal: SignalType;
+  let signalEmoji: string;
+  
+  if (score >= 12) {
+    signal = 'STRONG_BUY';
+    signalEmoji = '🟢🟢🟢';
+  } else if (score >= 7) {
+    signal = 'BUY';
+    signalEmoji = '🟢🟢';
+  } else if (score >= 3) {
+    signal = 'WEAK_BUY';
+    signalEmoji = '🟢';
+  } else if (score >= -2) {
+    signal = 'NEUTRAL';
+    signalEmoji = '⚪';
+  } else if (score >= -6) {
+    signal = 'WEAK_SELL';
+    signalEmoji = '🔴';
+  } else if (score >= -11) {
+    signal = 'SELL';
+    signalEmoji = '🔴🔴';
+  } else {
+    signal = 'STRONG_SELL';
+    signalEmoji = '🔴🔴🔴';
+  }
+  
+  // Confidence: Map score to 10-95%
+  const confidence = Math.min(95, Math.max(10, 50 + (Math.abs(score) * 3)));
+  
+  // ═══════════════════════════════════════
+  // STEP 4: CALCULATE TRADE SETUP
+  // ═══════════════════════════════════════
+  
+  const isBuySignal = signal.includes('BUY');
+  
+  let stopLoss: number;
+  let target1: number, target2: number, target3: number;
+  
+  if (isBuySignal) {
+    // Stop loss below recent swing low
+    stopLoss = Math.min(findSwingLow(candles, 15), currentPrice - (atr * 2));
+    stopLoss = Math.round(stopLoss * 100) / 100;
+    
+    const risk = currentPrice - stopLoss;
+    target1 = Math.round((currentPrice + risk * 1.5) * 100) / 100;  // 1:1.5 RR
+    target2 = Math.round((currentPrice + risk * 2.5) * 100) / 100;  // 1:2.5 RR
+    target3 = Math.round((currentPrice + risk * 3.5) * 100) / 100;  // 1:3.5 RR
+  } else if (signal.includes('SELL')) {
+    // Stop loss above recent swing high
+    stopLoss = Math.max(findSwingHigh(candles, 15), currentPrice + (atr * 2));
+    stopLoss = Math.round(stopLoss * 100) / 100;
+    
+    const risk = stopLoss - currentPrice;
+    target1 = Math.round((currentPrice - risk * 1.5) * 100) / 100;
+    target2 = Math.round((currentPrice - risk * 2.5) * 100) / 100;
+    target3 = Math.round((currentPrice - risk * 3.5) * 100) / 100;
+  } else {
+    // Neutral
+    stopLoss = Math.round((currentPrice - atr * 2) * 100) / 100;
+    target1 = Math.round((currentPrice + atr * 2) * 100) / 100;
+    target2 = Math.round((currentPrice + atr * 3) * 100) / 100;
+    target3 = Math.round((currentPrice + atr * 4) * 100) / 100;
+  }
+  
+  const riskPerShare = Math.abs(currentPrice - stopLoss);
+  const rewardPerShare = Math.abs(target2 - currentPrice);
+  const riskRewardRatio = riskPerShare > 0 ? Math.round((rewardPerShare / riskPerShare) * 10) / 10 : 0;
+  
+  // If R:R is too poor, downgrade signal to NEUTRAL
+  if (riskRewardRatio < 1.5 && signal !== 'NEUTRAL') {
+    reasons.push({
+      indicator: 'Risk Management',
+      value: `R:R = 1:${riskRewardRatio}`,
+      interpretation: `Risk-Reward ratio too low (1:${riskRewardRatio}). Minimum required is 1:1.5. Signal downgraded to NEUTRAL. Wait for better setup.`,
+      type: 'neutral',
+      score: 0,
+      icon: '⚠️'
+    });
+    // Don't downgrade strong signals
+    if (Math.abs(score) < 10) {
+      signal = 'NEUTRAL';
+      signalEmoji = '⚪';
+    }
+  }
+  
+  const tradeSetup: TradeSetup = {
+    entry: currentPrice,
+    stopLoss,
+    target1,
+    target2,
+    target3,
+    riskPerShare: Math.round(riskPerShare * 100) / 100,
+    rewardPerShare: Math.round(rewardPerShare * 100) / 100,
+    riskRewardRatio,
+    positionSizeForRisk: (capitalRiskAmount: number) => {
+      return riskPerShare > 0 ? Math.floor(capitalRiskAmount / riskPerShare) : 0;
+    }
+  };
+  
+  // ═══════════════════════════════════════
+  // STEP 5: DETERMINE OVERALL TREND
+  // ═══════════════════════════════════════
+  
+  let trendDirection: 'UPTREND' | 'DOWNTREND' | 'SIDEWAYS' = 'SIDEWAYS';
+  let trendStrength: 'STRONG' | 'MODERATE' | 'WEAK' = 'WEAK';
+  
+  const trendScore = (ema9 > ema21 ? 1 : -1) + (ema21 > ema50 ? 1 : -1) + (ema50 > ema200 ? 1 : -1);
+  if (trendScore >= 2) trendDirection = 'UPTREND';
+  else if (trendScore <= -2) trendDirection = 'DOWNTREND';
+  
+  if (adxVal > 40) trendStrength = 'STRONG';
+  else if (adxVal > 25) trendStrength = 'MODERATE';
+  
+  // ═══════════════════════════════════════
+  // STEP 6: BUILD SUMMARY
+  // ═══════════════════════════════════════
+  
+  const bullishCount = reasons.filter(r => r.type === 'bullish').length;
+  const bearishCount = reasons.filter(r => r.type === 'bearish').length;
+  
+  let summary = `${symbol} is showing a ${signal.replace('_', ' ')} signal with ${confidence}% confidence. `;
+  summary += `${bullishCount} indicators are bullish, ${bearishCount} are bearish. `;
+  summary += `Trend is ${trendDirection} (${trendStrength}). `;
+  
+  if (isBuySignal) {
+    summary += `Entry at ₹${currentPrice.toFixed(2)}, targets at ₹${target1.toFixed(2)}/₹${target2.toFixed(2)}/₹${target3.toFixed(2)}, stop loss at ₹${stopLoss.toFixed(2)}. `;
+    summary += `Risk-Reward: 1:${riskRewardRatio}. Risk ₹${riskPerShare.toFixed(2)} per share to make ₹${rewardPerShare.toFixed(2)}.`;
+  } else if (signal.includes('SELL')) {
+    summary += `Short entry at ₹${currentPrice.toFixed(2)}, targets at ₹${target1.toFixed(2)}/₹${target2.toFixed(2)}, stop loss at ₹${stopLoss.toFixed(2)}.`;
+  } else {
+    summary += `No clear trade setup. Wait for confirmation.`;
+  }
+  
+  // ═══════════════════════════════════════
+  // STEP 7: RETURN COMPLETE SIGNAL
+  // ═══════════════════════════════════════
+  
+  const allIndicators: AllIndicatorValues = {
+    rsi, 
+    macd: { line: macdLine, signal: macdSignal, histogram: macdHist, crossover: macdCrossover },
+    ema9, ema21, ema50, ema200, sma20, sma50, sma200,
+    supertrend: { signal: stSignal, value: stValue },
+    bollinger: { upper: bbUpper, middle: bbMiddle, lower: bbLower, percentB: bbPercentB, bandwidth: bbBandwidth },
+    stochastic: { k: stochK, d: stochD },
+    adx: { adx: adxVal, plusDI, minusDI },
+    atr, vwap, obv, cci, williamsR, mfi,
+    parabolicSar: { value: psarValue, signal: psarSignal },
+    volume: { current: volAnalysis.currentVolume, average: volAnalysis.averageVolume, ratio: volAnalysis.volumeRatio, trend: volAnalysis.volumeTrend },
+    pivots, supports, resistances,
+  };
+  
+  return {
+    id: `SIG-${symbol}-${Date.now()}`,
+    symbol,
+    stockName,
+    exchange,
+    timeframe,
+    timestamp: Date.now(),
+    signal,
+    signalEmoji,
+    score,
+    maxPossibleScore: 40,
+    confidence,
+    currentPrice,
+    tradeSetup,
+    reasons: reasons.sort((a, b) => Math.abs(b.score) - Math.abs(a.score)),
+    bullishReasons: reasons.filter(r => r.type === 'bullish').sort((a, b) => b.score - a.score),
+    bearishReasons: reasons.filter(r => r.type === 'bearish').sort((a, b) => a.score - b.score),
+    neutralReasons: reasons.filter(r => r.type === 'neutral'),
+    detectedPatterns: allPatterns,
+    candlePatterns: candlePats,
+    chartPatterns: chartPats,
+    indicators: allIndicators,
+    volumeAnalysis: volAnalysis.description,
+    rsiDivergence: divergence.description,
+    trendDirection,
+    trendStrength,
+    summary,
+    status: 'active',
+  };
+}
+
+// ═══════════════════════════════════════════════════════════
+// TradeSignal Pro — Live Market Monitor
+// Continuously monitors stocks and generates real-time signals
+// Made with ❤️ by Shahrukh
+// ═══════════════════════════════════════════════════════════
+
+import { OHLCV } from './indicators';
+import { generateLiveSignal, LiveSignal } from './signalEngine';
+
+export interface MonitorConfig {
+  symbols: Array<{ symbol: string; name: string; exchange: string }>;
+  timeframe: string;
+  scanIntervalMs: number;          // How often to re-scan (e.g., 30000 = 30 seconds)
+  signalChangeCallback: (signal: LiveSignal) => void;
+  priceUpdateCallback?: (symbol: string, price: number, change: number) => void;
+  errorCallback?: (error: string) => void;
+}
+
+export interface MonitoredStock {
+  symbol: string;
+  name: string;
+  exchange: string;
+  candles: OHLCV[];
+  lastSignal: LiveSignal | null;
+  lastPrice: number;
+  lastUpdate: number;
+  priceChangePercent: number;
+}
+
+export class LiveMarketMonitor {
+  private config: MonitorConfig;
+  private stocks: Map<string, MonitoredStock> = new Map();
+  private intervalId: ReturnType<typeof setInterval> | null = null;
+  private isRunning: boolean = false;
+  private scanCount: number = 0;
+  
+  constructor(config: MonitorConfig) {
+    this.config = config;
+    
+    // Initialize stock entries
+    for (const stock of config.symbols) {
+      this.stocks.set(stock.symbol, {
+        symbol: stock.symbol,
+        name: stock.name,
+        exchange: stock.exchange,
+        candles: [],
+        lastSignal: null,
+        lastPrice: 0,
+        lastUpdate: 0,
+        priceChangePercent: 0,
+      });
+    }
+  }
+  
+  // ═══════════════════════════════════════
+  // START MONITORING
+  // ═══════════════════════════════════════
+  
+  start(): void {
+    if (this.isRunning) return;
+    this.isRunning = true;
+    
+    console.log(`[Monitor] Starting live monitoring for ${this.stocks.size} stocks...`);
+    
+    // Initial scan
+    this.scanAllStocks();
+    
+    // Set up recurring scan
+    this.intervalId = setInterval(() => {
+      this.scanAllStocks();
+    }, this.config.scanIntervalMs);
+  }
+  
+  stop(): void {
+    if (this.intervalId) {
+      clearInterval(this.intervalId);
+      this.intervalId = null;
+    }
+    this.isRunning = false;
+    console.log('[Monitor] Stopped.');
+  }
+  
+  // ═══════════════════════════════════════
+  // FEED NEW CANDLE DATA
+  // ═══════════════════════════════════════
+  
+  updateCandleData(symbol: string, candles: OHLCV[]): void {
+    const stock = this.stocks.get(symbol);
+    if (!stock) return;
+    
+    stock.candles = candles;
+    stock.lastUpdate = Date.now();
+    
+    if (candles.length > 0) {
+      const lastCandle = candles[candles.length - 1];
+      const prevPrice = stock.lastPrice;
+      stock.lastPrice = lastCandle.close;
+      
+      if (prevPrice > 0) {
+        stock.priceChangePercent = ((lastCandle.close - prevPrice) / prevPrice) * 100;
+      }
+      
+      this.config.priceUpdateCallback?.(
+        symbol,
+        lastCandle.close,
+        stock.priceChangePercent
+      );
+    }
+  }
+  
+  // Add a single new candle (live update)
+  appendCandle(symbol: string, candle: OHLCV): void {
+    const stock = this.stocks.get(symbol);
+    if (!stock) return;
+    
+    // If same timestamp, update last candle (live candle updating)
+    if (stock.candles.length > 0 && stock.candles[stock.candles.length - 1].time === candle.time) {
+      stock.candles[stock.candles.length - 1] = candle;
+    } else {
+      stock.candles.push(candle);
+      // Keep max 300 candles
+      if (stock.candles.length > 300) {
+        stock.candles = stock.candles.slice(-300);
+      }
+    }
+    
+    stock.lastPrice = candle.close;
+    stock.lastUpdate = Date.now();
+  }
+  
+  // ═══════════════════════════════════════
+  // SCAN ALL STOCKS
+  // ═══════════════════════════════════════
+  
+  private scanAllStocks(): void {
+    this.scanCount++;
+    
+    for (const [symbol, stock] of this.stocks) {
+      if (stock.candles.length < 50) continue; // Need minimum data
+      
+      try {
+        const newSignal = generateLiveSignal(
+          stock.candles,
+          stock.symbol,
+          stock.name,
+          stock.exchange,
+          this.config.timeframe
+        );
+        
+        // Check if signal changed from last scan
+        const signalChanged = !stock.lastSignal || 
+          stock.lastSignal.signal !== newSignal.signal ||
+          Math.abs(stock.lastSignal.score - newSignal.score) >= 3;
+        
+        if (signalChanged) {
+          console.log(`[Monitor] ${symbol}: ${newSignal.signal} (Score: ${newSignal.score}, Confidence: ${newSignal.confidence}%)`);
+          this.config.signalChangeCallback(newSignal);
+        }
+        
+        stock.lastSignal = newSignal;
+        
+      } catch (error: any) {
+        this.config.errorCallback?.(`Error scanning ${symbol}: ${error.message}`);
+      }
+    }
+  }
+  
+  // ═══════════════════════════════════════
+  // SCAN SINGLE STOCK (on demand)
+  // ═══════════════════════════════════════
+  
+  scanStock(symbol: string): LiveSignal | null {
+    const stock = this.stocks.get(symbol);
+    if (!stock || stock.candles.length < 50) return null;
+    
+    const signal = generateLiveSignal(
+      stock.candles,
+      stock.symbol,
+      stock.name,
+      stock.exchange,
+      this.config.timeframe
+    );
+    
+    stock.lastSignal = signal;
+    return signal;
+  }
+  
+  // ═══════════════════════════════════════
+  // GET CURRENT STATE
+  // ═══════════════════════════════════════
+  
+  getSignal(symbol: string): LiveSignal | null {
+    return this.stocks.get(symbol)?.lastSignal || null;
+  }
+  
+  getAllSignals(): LiveSignal[] {
+    const signals: LiveSignal[] = [];
+    for (const stock of this.stocks.values()) {
+      if (stock.lastSignal) signals.push(stock.lastSignal);
+    }
+    return signals.sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+  }
+  
+  getBuySignals(): LiveSignal[] {
+    return this.getAllSignals().filter(s => s.signal.includes('BUY'));
+  }
+  
+  getSellSignals(): LiveSignal[] {
+    return this.getAllSignals().filter(s => s.signal.includes('SELL'));
+  }
+  
+  getStrongSignals(): LiveSignal[] {
+    return this.getAllSignals().filter(s => s.signal.includes('STRONG'));
+  }
+  
+  getMonitoredStock(symbol: string): MonitoredStock | undefined {
+    return this.stocks.get(symbol);
+  }
+  
+  getScanCount(): number {
+    return this.scanCount;
+  }
+  
+  isActive(): boolean {
+    return this.isRunning;
+  }
+  
+  // ═══════════════════════════════════════
+  // ADD / REMOVE STOCKS
+  // ═══════════════════════════════════════
+  
+  addStock(symbol: string, name: string, exchange: string = 'NSE'): void {
+    if (!this.stocks.has(symbol)) {
+      this.stocks.set(symbol, {
+        symbol, name, exchange,
+        candles: [], lastSignal: null, lastPrice: 0, lastUpdate: 0, priceChangePercent: 0,
+      });
+    }
+  }
+  
+  removeStock(symbol: string): void {
+    this.stocks.delete(symbol);
+  }
+  
+  // ═══════════════════════════════════════
+  // SIMULATE LIVE PRICE (for demo mode)
+  // ═══════════════════════════════════════
+  
+  simulateLiveTick(symbol: string): void {
+    const stock = this.stocks.get(symbol);
+    if (!stock || stock.candles.length === 0) return;
+    
+    const lastCandle = stock.candles[stock.candles.length - 1];
+    const volatility = lastCandle.close * 0.002;
+    const change = (Math.random() - 0.48) * volatility;
+    
+    const newClose = lastCandle.close + change;
+    const updatedCandle: OHLCV = {
+      ...lastCandle,
+      close: Math.round(newClose * 100) / 100,
+      high: Math.max(lastCandle.high, newClose),
+      low: Math.min(lastCandle.low, newClose),
+      volume: lastCandle.volume + Math.floor(Math.random() * 10000),
+    };
+    
+    this.appendCandle(symbol, updatedCandle);
+  }
+}
+
+// ═══════════════════════════════════════
+// FACTORY FUNCTION — Quick Setup
+// ═══════════════════════════════════════
+
+export function createMonitor(
+  symbols: Array<{ symbol: string; name: string }>,
+  onSignal: (signal: LiveSignal) => void,
+  intervalMs: number = 30000
+): LiveMarketMonitor {
+  return new LiveMarketMonitor({
+    symbols: symbols.map(s => ({ ...s, exchange: 'NSE' })),
+    timeframe: '15m',
+    scanIntervalMs: intervalMs,
+    signalChangeCallback: onSignal,
+    errorCallback: (err) => console.error('[Monitor Error]', err),
+  });
+}
+
+
+
+

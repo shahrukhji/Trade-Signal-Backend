@@ -1,0 +1,17 @@
+packages:
+  "lightweight-charts": "High performance financial charts for the mobile chart screen"
+  "framer-motion": "Smooth UI animations and page transitions"
+  "zustand": "Global state management for settings, paper trading, and preferences"
+  "date-fns": "Date formatting for charts and signal history"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility for merging tailwind classes without style conflicts"
+
+images:
+  - path: "artifacts/tradesignal-pro/public/images/splash-logo.png"
+    description: "A sleek, glowing neon green and blue candlestick chart logo on a pure black background, minimalist and modern, high-tech trading aesthetic"
+    aspect_ratio: "1:1"
+
+notes:
+  - "Using zustand for localStorage sync of trading preferences, paper trading state, and auth"
+  - "Using lightweight-charts for the main trading chart, wrapped in a React component"
+  - "App is strictly mobile-first, designed for 360-412px viewports (Android style)"

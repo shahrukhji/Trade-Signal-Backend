@@ -1,0 +1,282 @@
+Build a React + TypeScript + Tailwind CSS Android-optimized web app
+"TradeSignal Pro" — a professional algo trading signal app.
+Backend API base: http://localhost:3000
+
+== BRANDING & THEME ==
+Dark mode only. Colors:
+  bg: #0A0A0F | card: #12121A | border: #1E1E2E | green: #00FF88
+  red: #FF3366 | blue: #00BFFF | gold: #FFD700 | text: #EAEAEA
+  muted: #8B8B9E | inputBg: #1A1A2E | warning: #FF9500
+Watermark EVERY screen bottom: "Made with ❤️ by Shahrukh"
+  Style: 11px, color #555555, ❤️ red #FF0000, centered, thin separator above.
+
+== ANDROID SCREEN RULES (CRITICAL) ==
+Viewport: 360-412px width. Mobile-first CSS only.
+Safe area: top 28px (status bar), bottom 64px (nav bar).
+Touch targets: min 48×48px. Text: min 13px (body 14-16px).
+Cards: border-radius 14px, padding 16px, margin 8px, shadow 0 2px 8px rgba(0,0,0,0.3)
+Buttons: full-width, height 50px, border-radius 12px, font-weight 600.
+Inputs: full-width, height 48px, border-radius 10px, font-size 16px.
+Scrolling: -webkit-overflow-scrolling: touch. NO horizontal scroll.
+Transitions: 200ms slide/fade. Pull-to-refresh on data screens.
+
+== BOTTOM NAVIGATION ==
+Fixed bottom, height 60px. 5 tabs:
+  🏠 Home | 📊 Charts | ⚡ Signals | 💼 Portfolio | ⚙️ Settings
+Active: #00BFFF icon+label. Inactive: #666666.
+
+== SCREEN 1: SPLASH (2 seconds) ==
+Animated candlestick icon + "TradeSignal Pro" + tagline + blue spinner
+"Connecting to markets..." → then go to Settings (first time) or Home.
+
+== SCREEN 2: SETTINGS ==
+Scrollable. 6 sections:
+
+SECTION 1 — BROKER CONNECTION
+Card: "Connect Broker"
+Toggle tabs: AngelOne | Groww
+  AngelOne inputs: API Key, PIN, TOTP Secret (auto-generates live TOTP preview with 30s countdown)
+  Groww sub-tabs: API Key+Secret | TOTP Flow | Direct Token
+  Each input has eye toggle for show/hide.
+Button: "🔌 Validate & Connect" (full-width blue)
+LIVE validation stepper (vertical timeline):
+  Step 1: Format check ✓/✗
+  Step 2: Generate token (spinner → success/error with message)
+  Step 3: Connect to servers (test profile API call)
+  Step 4: Fetch account details (show name, client ID)
+  Step 5: Test market data (fetch RELIANCE quote live)
+  Step 6: Check order permissions
+CONNECTION STATUS CARD (updates live):
+  🟢 CONNECTED: name, client ID, token expiry countdown, "Re-validate | Disconnect"
+  🟡 PARTIAL: connected but limited features
+  🔴 FAILED: error message + troubleshooting steps + "Try Again"
+Auto-revalidate every 5 minutes silently. Show token expiry countdown.
+30 mins before expiry: banner "Token expiring soon. Tap to refresh."
+
+SECTION 2 — GEMINI AI
+Card: "🤖 Gemini AI Configuration"
+Input: API Key (eye toggle, char count ~39)
+Expandable help: "How to get free key" → step-by-step guide → link to aistudio.google.com
+Model dropdown: gemini-2.0-flash (default) | gemini-1.5-pro | gemini-1.5-flash
+Analysis depth cards: Quick(5s) | Standard(15s, default) | Deep(30s)
+Button: "🧪 Test Gemini" → validation stepper:
+  Step 1: Key format check (starts with AIzaSy, ~39 chars)
+  Step 2: Real API call → POST .../gemini-2.0-flash:generateContent?key=...
+    { contents:[{parts:[{text:"Reply CONNECTED"}]}] }
+  Step 3: Test analysis capability (send sample stock data prompt)
+  Step 4: Show rate limit remaining
+STATUS CARD:
+  🟢 Active: model, rate limit, "AI ready!" | 🔴 Failed: error + fix guide
+  🔷 Not configured: "Add free key above. 60 req/min, no credit card!"
+Auto health-check every 10 mins.
+
+Optional section (collapsible): Add OpenAI (sk-...) or Claude (sk-ant-...) as alternative.
+
+SECTION 3 — TRADING PREFERENCES
+Dropdowns: Trading Mode, Segment, Exchange, Product Type, Order Type, Risk Level
+Number inputs: Max Loss% (default 2), Target% (default 4), Max Daily Loss% (5),
+  Max Trades/day (10), Default Quantity (1)
+Dropdown: Preferred Timeframe (default 15m)
+
+SECTION 4 — ALERTS & SAFETY
+Toggles (with descriptions):
+  Auto Stop Loss ON | Trailing Stop Loss ON | Sound Alerts ON
+  Vibration ON | Auto Trade OFF (red warning if ON) | Paper Trading ON | Detailed Analysis ON
+
+SECTION 5 — CONNECTION DASHBOARD (top of settings page)
+Summary card always visible:
+  Groww 🟢/🔴 | Gemini AI 🟢/🔴 | Market 🟢/🔴 | Paper Mode badge
+  "Everything ready!" or specific issue message.
+  Dots are tappable — show detail tooltip.
+
+Save button: "💾 Save All Settings" (green). Reset link below.
+
+== SCREEN 3: HOME ==
+Top bar: "TradeSignal Pro" + connection dots (Groww, AI, Market, each tappable) + 🔔 + ⚙️
+Market banner: 🟢 Open (pulse) | 🟡 Pre-market | 🔴 Closed (time until open)
+Greeting: "Good [Morning/Afternoon/Evening], Trader! 👋" + date + live clock IST
+
+2×2 Account Cards:
+  Portfolio Value ₹X.XX (+X% green/red) + mini sparkline
+  Today's P&L ₹X.XX (green/red) + arrow
+  Win Rate X% circular ring (green>60%, yellow 40-60%, red<40%) "22W/8L"
+  Active Signals: count "3 Buy, 2 Sell" + pulse dot
+
+Market Indices (horizontal scroll, show 2.5 cards):
+  NIFTY 50 | BANK NIFTY | SENSEX | NIFTY IT | INDIA VIX
+  Each: price, change%, mini sparkline, green/red gradient
+
+AI Status Card: "Gemini Active | X/1500 analyses today | Accuracy 78%"
+  Button: "🔍 Scan All NIFTY50 Stocks"
+
+Hot Signals Preview: Top 3 mini cards (stock, signal badge, target%, confidence%)
+Quick Actions row (horizontal scroll): Scan | Chart | AI Analysis | Watchlist
+
+Recent Activity: Last 5 items with timestamp and green/red icons.
+
+== SCREEN 4: CHART (Core Screen) ==
+Search bar (autocomplete from /api/symbols/search). Recent searches as chips.
+Quick picks: RELIANCE | TCS | INFY | HDFCBANK | ICICIBANK
+
+Stock header: Name, Symbol, NSE badge, live price (updates every 2s),
+  change ₹ and % (green/red), Day range L/H, 52W L/H, Volume
+
+Chart (TradingView lightweight-charts):
+  import { createChart } from 'lightweight-charts'
+  Width: 100%, Height: 55vh
+  createChart(container, { width, height: window.innerHeight*0.55,
+    layout:{ background:{color:'#0A0A0F'}, textColor:'#EAEAEA' },
+    grid:{ vertLines:{color:'#1A1A2E'}, horzLines:{color:'#1A1A2E'} },
+    crosshair:{ mode:0 } })
+  Candlestick series: upColor:#00FF88, downColor:#FF3366, wickUpColor:#00FF88, wickDownColor:#FF3366
+  Volume histogram: below chart, 25% height, semi-transparent
+  Chart type switcher: 🕯️Candle | 📈Line | 📊Bar | 🔶HeikinAshi
+  Timeframe pills (horizontal scroll): 1m 3m 5m 15m 30m 1H 4H 1D 1W 1M (default 15m)
+  Selected: solid blue bg. Pinch-zoom, drag-pan, crosshair on long-press.
+  Top-left overlay: symbol + timeframe. Top-right: O/H/L/C on hover.
+
+Indicators Panel (collapsible "📊 Indicators"):
+  Trend: SMA20/50/200, EMA9/21/50/200, MACD(12,26,9), Supertrend(10,3),
+         ParabolicSAR(0.02,0.2), Ichimoku, ADX(14), VWAP
+  Momentum: RSI(14), Stochastic(14,3,3), CCI(20), WilliamsR(14), MFI(14), ROC(12)
+  Volume: Bars, OBV, VolumeSMA, VWAPBands
+  Volatility: BB(20,2), ATR(14), Keltner(20,1.5), Donchian(20)
+  Each: toggle ON/OFF + live value + color dot (green/red/yellow = bull/bear/neutral)
+  Indicator summary box: "RSI(14): 42.5 — Neutral", "MACD: Bullish ↑", etc.
+
+Chart Patterns Card (collapsible "🔍 Patterns"):
+  Auto-detect: H&S, InvH&S, DoubleTop/Bottom, Triangles(Asc/Desc/Sym),
+    BullFlag, BearFlag, RisingWedge, FallingWedge, CupHandle, Channel, Rectangle
+  Each: name, 🟢/🔴/🟡 badge, ⭐ reliability, expected move%, marker on chart
+
+Candle Patterns Card (collapsible "🕯️ Candles"):
+  Detect last 3-5 candles: Doji, Hammer, InvHammer, HangingMan, ShootingStar,
+    BullEngulf, BearEngulf, MorningStar, EveningStar, 3WhiteSoldiers, 3BlackCrows,
+    PiercingLine, DarkCloud, BullHarami, BearHarami, TweezerTop/Bottom,
+    BullMarubozu, BearMarubozu, SpinningTop, DragonflyDoji, GravestoneDoji
+  Each: name, signal badge, one-line explanation, "Found on last X candles"
+
+Support/Resistance Card (📏 Key Levels):
+  R3/R2/R1 | Current Price (highlighted) | S1/S2/S3 | Pivot Point
+  Pivot type selector: Standard | Fibonacci | Camarilla
+  Draw horizontal dashed lines on chart for each level.
+
+AI ANALYSIS BUTTON (large, prominent, gold gradient border):
+  Label: "🤖 Analyze with Gemini AI"
+  Shows badge: "AI Ready ✅" or "Setup Needed ⚠️"
+  If not configured → modal: "Get free Gemini key" with link + "Go to Settings"
+  If configured → tap shows full-screen overlay:
+    Dark backdrop + animated AI brain icon + progress steps:
+    "Collecting 200 candles..." → "Calculating indicators..." →
+    "Detecting patterns..." → "Sending to Gemini..." → "Parsing response..."
+  
+  Send to Gemini:
+    POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}
+    Body: { contents:[{parts:[{text: fullPrompt}]}], generationConfig:{temperature:0.3, maxOutputTokens:4096} }
+    fullPrompt includes: stock, timeframe, last 100 OHLCV candles (JSON),
+      all indicator values, detected patterns, support/resistance levels.
+    Ask Gemini to return strict JSON: { overall_trend, signal, confidence_percentage,
+      entry_price, target_1, target_2, target_3, stop_loss, risk_reward_ratio,
+      time_horizon, reasoning[], risk_factors[], chart_pattern_analysis,
+      volume_analysis, momentum_analysis, summary }
+    Extract JSON from response (handle markdown code block wrapping).
+    Error handling: 429→show 60s countdown retry | 401/403→"Invalid key, go to Settings"
+
+  AI Result Card:
+    Large signal circle (🟢/🔴/🟡) + confidence ring (% in center)
+    Trade Setup: Entry ₹X | T1 ₹X (+X%) | T2 ₹X | T3 ₹X | SL ₹X | R:R 1:X
+    "Why?" section (green bullets, expandable) + "Risks" (red bullets, expandable)
+    Detailed Analysis paragraphs (expandable)
+    Buttons: Copy Analysis | Re-analyze | Execute Trade
+    Counter: "Gemini analyses today: 24/1500"
+
+Signal Action Box (sticky, above bottom nav):
+  Height 80px, rounded top 20px.
+  BUY: green gradient, "📈 BUY | Entry ₹X | T ₹X | SL ₹X | 85% | 1:3 | Execute →"
+  SELL: red gradient same format.
+  NEUTRAL: gray "⏳ Wait for confirmation"
+
+Trade Execution Modal (on Execute tap):
+  Stock + direction, Quantity input (pre-filled), Price, SL, Trigger Price,
+  Order Type dropdown, Product dropdown, Exchange dropdown
+  Calculated: Order Value, Max Risk ₹X (X%), Expected Profit ₹X (X%)
+  Toggle: "Set Stop Loss Order" | Checkbox: "I understand the risks"
+  Buttons: ✅ Confirm & Place (calls POST /api/orders/place) | ❌ Cancel
+  Success toast "✅ Order placed!" | Error toast "❌ Failed: {reason}"
+
+== SCREEN 5: SIGNALS ==
+Filter chips (horizontal scroll): All | 🟢Buy | 🔴Sell | 💪Strong | ⚡Active | ✅Done
+Sort: Latest | Highest Confidence | Best R:R
+Summary bar: "Today: 5 | 3 Buy | 2 Sell | Avg 78%"
+
+Each Signal Card:
+  Stock avatar (letter circle) + name + full name
+  Signal badge: STRONG BUY 🟢🟢🟢 / BUY 🟢🟢 / WEAK BUY 🟢 / NEUTRAL / WEAK SELL 🔴 / SELL 🔴🔴 / STRONG SELL 🔴🔴🔴
+  Confidence progress bar (red→yellow→green gradient) + "Score: 14/20"
+  CMP ₹X | Entry ₹X | Change arrow
+  Grid: T1 ₹X(+2%) | T2 ₹X(+4%) | T3 ₹X(+7%) | SL ₹X(-1.6%)
+  Stats: R:R 1:3 | Profit ₹X | Risk ₹X | "15m ago"
+  AI badge: "🤖 AI Confirmed" if Gemini agreed
+  Expandable "WHY? (tap)": indicator bullets (✅/❌/⚠️ + value + plain English meaning)
+  Action buttons: 📊Chart | 🤖AI | 💰Trade | ➕Watch
+
+Performance card: Total 150 | Win 110(73%) | Loss 40 | Avg +3.2% | Best +12.5% | 🔥5 streak
+
+== SCREEN 6: PORTFOLIO ==
+Summary card: Total ₹X | Invested ₹X | P&L +₹X(+6.8%) | Today +₹X | Donut chart
+Tabs: Holdings | Open Orders | Trade History
+
+Holdings: stock, qty, avg price, CMP, P&L (green glow +, red glow -)
+  mini sparkline, buttons: Add More | Exit | Alert
+Orders: stock, BUY/SELL badge, qty, price, status badge (Open/Done/Cancelled/Rejected)
+  Cancel button for open orders
+History: date range filter, each trade: entry/exit dates, buy/sell price, qty, P&L%, duration
+
+== STOCK SCANNER FEATURE ==
+Full-screen overlay from Home "Scan All Stocks" button.
+Progress bar + "Scanning NIFTY50... (15/50)" live SSE updates.
+Results in sections: 🟢 Strong Buy | 🟡 Neutral | 🔴 Strong Sell
+Each row: stock + signal + score + confidence + action buttons
+Filters: All | Oversold(RSI<30) | Overbought(RSI>70) | Breakouts | Volume Spike | Patterns
+
+== WATCHLIST ==
+Add/remove stocks. Each shows live price, change, signal dot.
+Swipe left → delete. Tap → open chart. Drag → reorder.
+Store in localStorage. Default: RELIANCE, TCS, INFY, HDFCBANK, ICICIBANK
+
+== PAPER TRADING MODE ==
+When ON: "📄 PAPER TRADING" red banner on EVERY screen top.
+Virtual ₹10,00,000. Simulated fills. Separate P&L tracker.
+All paper trades stored in localStorage. Show paper vs real P&L separately.
+
+== GLOBAL STATUS BAR (every screen) ==
+Under top bar: tiny dots — 🟢/🔴 Groww | 🟢/🔴 Gemini | 🟢/🔴 Market
+Each tappable → shows detail popup.
+If any disconnects → dismissible banner: "[Service] disconnected. Tap to reconnect."
+
+== MOCK DATA (when API unavailable) ==
+Generate realistic OHLCV (200 candles) for 25 NIFTY stocks.
+Live price simulation: ±0.1-0.5% every 3 seconds.
+Mock portfolio (5 holdings), mock orders (20), mock signals with full reasoning.
+Show "📊 Demo Mode — Simulated Data" banner when active.
+
+== PRICE ALERTS ==
+Set alert per stock: above/below/change%. In-app toast + vibration.
+Store in localStorage. Bell icon with badge count.
+
+== TECH STACK ==
+React + TypeScript + Tailwind CSS (dark)
+TradingView lightweight-charts (CDN or npm)
+React Router (bottom tab navigation)
+Lucide React (icons) | Sonner (toasts) | Framer Motion (animations)
+localStorage for: credentials (encrypted), settings, watchlist, signals cache, paper trades
+Fetch API for all HTTP calls.
+
+== STORAGE KEYS ==
+broker_auth: { method, apiKey(enc), token(enc), expiry, status, username, clientId, lastValidated }
+gemini_config: { apiKey(enc), model, depth, status, lastTested, requestsToday }
+trading_prefs: { mode, segment, exchange, product, orderType, riskLevel, maxLoss, target, qty, tf }
+alerts_config: { autoSL, trailingSL, sound, vibration, autoTrade, paperMode, detailedAnalysis }
+watchlist: ["RELIANCE","TCS",...]
+paper_portfolio: { balance, holdings[], trades[] }
+signal_history: [...last 100 signals]
