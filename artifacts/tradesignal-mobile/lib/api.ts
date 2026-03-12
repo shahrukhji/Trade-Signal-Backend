@@ -1,4 +1,5 @@
-const BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
+const FALLBACK_DOMAIN = '15007c63-7d1f-4e05-adee-a542a17f6879-00-36poe8uxor3xw.worf.replit.dev';
+const BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN || FALLBACK_DOMAIN}`;
 
 async function req<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {

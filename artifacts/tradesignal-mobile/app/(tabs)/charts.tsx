@@ -77,7 +77,7 @@ export default function ChartsScreen() {
   const [showSearch, setShowSearch] = useState(false);
   const [showEMA, setShowEMA] = useState(true);
   const [showBB, setShowBB] = useState(false);
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const fetchCandles = useCallback(async (sym: SearchResult, iv: typeof interval) => {
     if (!session?.jwtToken) return;

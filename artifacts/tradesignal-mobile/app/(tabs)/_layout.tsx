@@ -2,7 +2,7 @@ import { BlurView } from "expo-blur";
 import { Tabs } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import { COLORS } from "@/constants/theme";
 
 export default function TabLayout() {
@@ -13,30 +13,31 @@ export default function TabLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: COLORS.accent,
-        tabBarInactiveTintColor: "rgba(255,255,255,0.35)",
+        tabBarInactiveTintColor: "rgba(255,255,255,0.30)",
         tabBarStyle: {
           position: "absolute",
           backgroundColor: isIOS ? "transparent" : COLORS.tabBar,
           borderTopWidth: 1,
           borderTopColor: COLORS.tabBarBorder,
           elevation: 0,
-          height: 56,
-          paddingBottom: Platform.OS === "android" ? 6 : 0,
+          height: Platform.OS === "android" ? 62 : 56,
+          paddingBottom: Platform.OS === "android" ? 8 : 0,
+          paddingTop: 4,
         },
         tabBarLabelStyle: {
           fontSize: 10,
           fontFamily: "Inter_500Medium",
-          marginTop: -2,
+          marginTop: -1,
         },
         tabBarBackground: () =>
           isIOS ? (
             <BlurView
-              intensity={80}
+              intensity={90}
               tint="dark"
               style={StyleSheet.absoluteFill}
             />
           ) : (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.tabBar }]} />
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: COLORS.tabBar, borderTopWidth: 1, borderTopColor: COLORS.tabBarBorder }]} />
           ),
       }}
     >
@@ -44,35 +45,60 @@ export default function TabLayout() {
         name="index"
         options={{
           title: "Home",
-          tabBarIcon: ({ color, size }) => <Feather name="trending-up" size={size - 2} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: 'center' }}>
+              {focused && <View style={{ position: 'absolute', top: -4, width: 20, height: 2, backgroundColor: COLORS.accent, borderRadius: 1 }} />}
+              <Feather name="trending-up" size={size - 2} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="charts"
         options={{
           title: "Charts",
-          tabBarIcon: ({ color, size }) => <Feather name="activity" size={size - 2} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: 'center' }}>
+              {focused && <View style={{ position: 'absolute', top: -4, width: 20, height: 2, backgroundColor: COLORS.accent, borderRadius: 1 }} />}
+              <Feather name="activity" size={size - 2} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="signals"
         options={{
           title: "Signals",
-          tabBarIcon: ({ color, size }) => <Feather name="zap" size={size - 2} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: 'center' }}>
+              {focused && <View style={{ position: 'absolute', top: -4, width: 20, height: 2, backgroundColor: COLORS.accent, borderRadius: 1 }} />}
+              <Feather name="zap" size={size - 2} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="portfolio"
         options={{
           title: "Portfolio",
-          tabBarIcon: ({ color, size }) => <Feather name="briefcase" size={size - 2} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: 'center' }}>
+              {focused && <View style={{ position: 'absolute', top: -4, width: 20, height: 2, backgroundColor: COLORS.accent, borderRadius: 1 }} />}
+              <Feather name="briefcase" size={size - 2} color={color} />
+            </View>
+          ),
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: "Settings",
-          tabBarIcon: ({ color, size }) => <Feather name="sliders" size={size - 2} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <View style={{ alignItems: 'center' }}>
+              {focused && <View style={{ position: 'absolute', top: -4, width: 20, height: 2, backgroundColor: COLORS.accent, borderRadius: 1 }} />}
+              <Feather name="sliders" size={size - 2} color={color} />
+            </View>
+          ),
         }}
       />
     </Tabs>
