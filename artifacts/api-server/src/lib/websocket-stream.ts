@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import type { Response } from "express";
-import { getSession } from "./angelone.js";
+import { getSession, login } from "./angelone.js";
 import { updateLTP } from "./paper-trading.js";
 
 interface TickData {
@@ -20,6 +20,8 @@ let ws: WebSocket | null = null;
 let reconnectDelay = 3000;
 let pingInterval: ReturnType<typeof setInterval> | null = null;
 let isConnecting = false;
+let retryCount = 0;
+const MAX_RETRIES = 5;
 const subscribedTokens: Map<string, { exchangeType: number; tokens: string[] }[]> = new Map();
 
 export function addSSEClient(res: Response): void {
@@ -56,6 +58,11 @@ function parseBinaryTick(buf: Buffer): TickData | null {
 }
 
 export function connectWebSocket(): void {
+  if (retryCount >= MAX_RETRIES) {
+    console.log("[WS] Max retries reached — SmartStream unavailable. Using REST polling for market data.");
+    return;
+  }
+
   const session = getSession();
   if (!session?.feedToken || isConnecting) return;
 
@@ -72,8 +79,9 @@ export function connectWebSocket(): void {
     });
 
     ws.on("open", () => {
-      console.log("[WS] Connected to AngelOne SmartStream");
+      console.log("[WS] Connected to AngelOne SmartStream ✓");
       reconnectDelay = 3000;
+      retryCount = 0;
       isConnecting = false;
 
       if (pingInterval) clearInterval(pingInterval);
@@ -101,23 +109,46 @@ export function connectWebSocket(): void {
       }
     });
 
-    ws.on("close", () => {
-      console.log(`[WS] Disconnected. Reconnecting in ${reconnectDelay}ms...`);
+    ws.on("close", (code) => {
       isConnecting = false;
       if (pingInterval) clearInterval(pingInterval);
+
+      if (code === 1000) {
+        console.log("[WS] Disconnected cleanly.");
+        return;
+      }
+
+      retryCount++;
+      if (retryCount >= MAX_RETRIES) {
+        console.log("[WS] SmartStream unavailable after max retries. Market data via REST only.");
+        return;
+      }
+
+      console.log(`[WS] Disconnected (code=${code}). Retry ${retryCount}/${MAX_RETRIES} in ${reconnectDelay / 1000}s...`);
       setTimeout(() => {
         reconnectDelay = Math.min(reconnectDelay * 2, 60000);
         connectWebSocket();
       }, reconnectDelay);
     });
 
-    ws.on("error", (err) => {
-      console.error("[WS] Error:", err.message);
+    ws.on("error", async (err) => {
       isConnecting = false;
       ws?.terminate();
+
+      if (err.message.includes("401")) {
+        console.log("[WS] Auth rejected (401) — refreshing session and retrying...");
+        try { await login(); } catch {}
+        setTimeout(() => connectWebSocket(), 5000);
+      } else {
+        retryCount++;
+        if (retryCount < MAX_RETRIES) {
+          console.log(`[WS] Error: ${err.message}. Retry ${retryCount}/${MAX_RETRIES}.`);
+        }
+      }
     });
   } catch (err) {
     isConnecting = false;
+    retryCount++;
     console.error("[WS] Failed to connect:", err);
   }
 }
@@ -153,6 +184,11 @@ export function unsubscribeTokens(tokenList: { exchangeType: number; tokens: str
 
 export function disconnectWebSocket(): void {
   if (pingInterval) clearInterval(pingInterval);
-  ws?.close();
+  ws?.close(1000);
   ws = null;
+  retryCount = 0;
+}
+
+export function resetRetryCount(): void {
+  retryCount = 0;
 }
