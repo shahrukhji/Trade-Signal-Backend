@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Search, BrainCircuit, Activity, Plus, TrendingUp, TrendingDown } from 'lucide-react';
+import { useState, useCallback } from 'react';
+import { Search, BrainCircuit, Activity, Plus, TrendingUp, TrendingDown, Sparkles, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartWidget } from '@/components/ChartWidget';
 import { useMarketData, useIndicators, useSignalAnalysis } from '@/hooks/use-trading';
@@ -17,6 +17,302 @@ const SIGNAL_BG: Record<string, string> = {
   STRONG_SELL: 'bg-destructive/20 text-destructive', SELL: 'bg-destructive/20 text-destructive', WEAK_SELL: 'bg-destructive/10 text-destructive',
 };
 
+const SIGNAL_EMOJI: Record<string, string> = {
+  STRONG_BUY: '🚀', BUY: '🟢', WEAK_BUY: '📈',
+  NEUTRAL: '⚪',
+  WEAK_SELL: '📉', SELL: '🔴', STRONG_SELL: '💥',
+};
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface CrossVerifyResult {
+  symbol: string;
+  price: number;
+  interval: string;
+  algo: {
+    signal: string; score: number; confidence: number; reasons: string[];
+    entry: number; target1: number; target2: number; target3: number;
+    stopLoss: number; riskReward: number;
+  };
+  ai: {
+    aiSignal: string; aiConfidence: number;
+    aiEntry: number; aiTarget1: number; aiTarget2: number; aiTarget3: number;
+    aiStopLoss: number; aiRiskReward: number;
+    agreementScore: number; verdict: 'CONFIRMED' | 'DISPUTED' | 'PARTIAL';
+    consensusSignal: string; consensusConfidence: number;
+    aiReasoning: string[]; conflicts: string[]; riskFactors: string[];
+    chartReading: string; tradeRecommendation: string;
+  };
+  patterns: { candlestick: string[]; chart: string[] };
+  analyzedAt: string;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function VerdictBadge({ verdict }: { verdict: string }) {
+  const cfg = {
+    CONFIRMED: { icon: CheckCircle, color: 'text-primary bg-primary/10 border-primary/20', label: '✅ AI CONFIRMED' },
+    DISPUTED:  { icon: XCircle,     color: 'text-destructive bg-destructive/10 border-destructive/20', label: '❌ AI DISPUTED' },
+    PARTIAL:   { icon: AlertCircle, color: 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20', label: '⚠️ PARTIAL MATCH' },
+  }[verdict] ?? { icon: AlertCircle, color: 'text-muted-foreground bg-muted border-border', label: verdict };
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full border text-xs font-bold ${cfg.color}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
+function AgreementBar({ score }: { score: number }) {
+  const color = score >= 70 ? '#00FF88' : score >= 40 ? '#FFD700' : '#FF3366';
+  return (
+    <div>
+      <div className="flex justify-between text-xs mb-1">
+        <span className="text-muted-foreground">Agreement Score</span>
+        <span className="font-bold font-mono" style={{ color }}>{score}%</span>
+      </div>
+      <div className="h-2 bg-input rounded-full overflow-hidden">
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${score}%` }}
+          transition={{ duration: 0.8, ease: 'easeOut' }}
+          className="h-full rounded-full"
+          style={{ background: color }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── AI Cross-Verify Modal ────────────────────────────────────────────────────
+
+function CrossVerifyModal({ result, onClose, onExecute }: {
+  result: CrossVerifyResult;
+  onClose: () => void;
+  onExecute: () => void;
+}) {
+  const [showAlgoDetails, setShowAlgoDetails] = useState(false);
+  const [showAiDetails, setShowAiDetails] = useState(false);
+  const { algo, ai, patterns } = result;
+  const isBullishConsensus = ai.consensusSignal.includes('BUY');
+  const isBearishConsensus = ai.consensusSignal.includes('SELL');
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-end justify-center">
+      <motion.div
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        className="w-full max-w-md bg-[#0D0D1A] border-t border-white/10 rounded-t-3xl overflow-y-auto max-h-[90vh]"
+      >
+        {/* Header */}
+        <div className="sticky top-0 bg-[#0D0D1A] px-5 pt-5 pb-3 border-b border-border z-10">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Sparkles size={18} className="text-accent" />
+              <h2 className="text-base font-bold text-foreground">AI Cross-Verify</h2>
+            </div>
+            <button onClick={onClose} className="p-1.5 rounded-lg bg-input text-muted-foreground">
+              <X size={16} />
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {result.symbol.replace('-EQ', '')} · ₹{result.price.toFixed(2)} · {result.interval}
+          </p>
+        </div>
+
+        <div className="px-5 py-4 space-y-4">
+          {/* Verdict + Agreement */}
+          <div className="glass-panel rounded-2xl border border-border p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <VerdictBadge verdict={ai.verdict} />
+              <span className="text-xs text-muted-foreground">
+                {new Date(result.analyzedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+            <AgreementBar score={ai.agreementScore} />
+          </div>
+
+          {/* Consensus — the final recommendation */}
+          <div className={`rounded-2xl border p-4 ${
+            isBullishConsensus ? 'bg-primary/5 border-primary/20' :
+            isBearishConsensus ? 'bg-destructive/5 border-destructive/20' :
+            'bg-muted/10 border-border'
+          }`}>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-1">Consensus Signal</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className={`text-lg font-extrabold font-mono ${
+                  isBullishConsensus ? 'text-primary' : isBearishConsensus ? 'text-destructive' : 'text-muted-foreground'
+                }`}>
+                  {SIGNAL_EMOJI[ai.consensusSignal] || '⚪'} {ai.consensusSignal.replace('_', ' ')}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">{ai.consensusConfidence}% consensus confidence</p>
+              </div>
+              <div className="text-right text-xs font-mono">
+                <p className="text-muted-foreground">R:R</p>
+                <p className="font-bold text-foreground">1:{(ai.aiRiskReward ?? algo.riskReward).toFixed(1)}</p>
+              </div>
+            </div>
+            {ai.tradeRecommendation && (
+              <p className="text-xs mt-3 text-foreground/80 leading-relaxed border-t border-border/50 pt-3">
+                {ai.tradeRecommendation}
+              </p>
+            )}
+          </div>
+
+          {/* Trade levels — consensus of algo + AI */}
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { label: 'Entry', algo: algo.entry, ai_: ai.aiEntry, colorClass: 'text-foreground' },
+              { label: 'Target 1', algo: algo.target1, ai_: ai.aiTarget1, colorClass: 'text-primary' },
+              { label: 'Stop Loss', algo: algo.stopLoss, ai_: ai.aiStopLoss, colorClass: 'text-destructive' },
+            ].map(row => (
+              <div key={row.label} className="bg-input/60 rounded-xl p-2.5">
+                <p className="text-[9px] text-muted-foreground mb-1">{row.label}</p>
+                <p className={`font-mono font-bold text-xs ${row.colorClass}`}>₹{(row.ai_ || row.algo).toFixed(0)}</p>
+                {row.ai_ && Math.abs(row.ai_ - row.algo) > 0.5 && (
+                  <p className="text-[8px] text-muted-foreground mt-0.5">
+                    Algo: ₹{row.algo.toFixed(0)}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Chart Reading (Gemini's natural language) */}
+          {ai.chartReading && (
+            <div className="bg-accent/5 border border-accent/20 rounded-xl p-3">
+              <p className="text-[10px] text-accent uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                <Sparkles size={9} /> Gemini Chart Reading
+              </p>
+              <p className="text-xs text-foreground/90 leading-relaxed">{ai.chartReading}</p>
+            </div>
+          )}
+
+          {/* Side-by-side: Algo vs AI signals */}
+          <div className="grid grid-cols-2 gap-3">
+            {/* Algo Engine */}
+            <div className="bg-card border border-border rounded-xl p-3">
+              <p className="text-[9px] text-muted-foreground uppercase mb-2 flex items-center gap-1">
+                <BrainCircuit size={9} /> 20-Algo Engine
+              </p>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded ${SIGNAL_BG[algo.signal] || 'bg-muted text-muted-foreground'}`}>
+                {SIGNAL_EMOJI[algo.signal]} {algo.signal.replace('_', ' ')}
+              </span>
+              <p className="text-[10px] text-muted-foreground mt-1.5">Conf: <span className="text-foreground font-mono">{algo.confidence}%</span></p>
+              <p className="text-[10px] text-muted-foreground">Score: <span className="text-foreground font-mono">{algo.score > 0 ? '+' : ''}{algo.score}</span></p>
+
+              <button
+                onClick={() => setShowAlgoDetails(!showAlgoDetails)}
+                className="text-[9px] text-accent mt-2 flex items-center gap-0.5"
+              >
+                {showAlgoDetails ? <ChevronUp size={9} /> : <ChevronDown size={9} />}
+                {showAlgoDetails ? 'Hide' : 'Show'} reasons
+              </button>
+              <AnimatePresence>
+                {showAlgoDetails && (
+                  <motion.ul initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden mt-2 space-y-1"
+                  >
+                    {algo.reasons.slice(0, 8).map((r, i) => (
+                      <li key={i} className={`text-[9px] ${r.includes('+') ? 'text-primary' : r.includes('-') ? 'text-destructive' : 'text-muted-foreground'}`}>
+                        • {r}
+                      </li>
+                    ))}
+                  </motion.ul>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Gemini AI */}
+            <div className="bg-card border border-accent/20 rounded-xl p-3">
+              <p className="text-[9px] text-accent uppercase mb-2 flex items-center gap-1">
+                <Sparkles size={9} /> Gemini AI
+              </p>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded ${SIGNAL_BG[ai.aiSignal] || 'bg-muted text-muted-foreground'}`}>
+                {SIGNAL_EMOJI[ai.aiSignal]} {ai.aiSignal?.replace('_', ' ')}
+              </span>
+              <p className="text-[10px] text-muted-foreground mt-1.5">Conf: <span className="text-foreground font-mono">{ai.aiConfidence}%</span></p>
+              <p className="text-[10px] text-muted-foreground">Model: <span className="text-foreground font-mono">Flash</span></p>
+
+              <button
+                onClick={() => setShowAiDetails(!showAiDetails)}
+                className="text-[9px] text-accent mt-2 flex items-center gap-0.5"
+              >
+                {showAiDetails ? <ChevronUp size={9} /> : <ChevronDown size={9} />}
+                {showAiDetails ? 'Hide' : 'Show'} reasoning
+              </button>
+              <AnimatePresence>
+                {showAiDetails && (
+                  <motion.ul initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                    className="overflow-hidden mt-2 space-y-1"
+                  >
+                    {(ai.aiReasoning ?? []).slice(0, 5).map((r, i) => (
+                      <li key={i} className="text-[9px] text-muted-foreground">• {r}</li>
+                    ))}
+                  </motion.ul>
+                )}
+              </AnimatePresence>
+            </div>
+          </div>
+
+          {/* Conflicts */}
+          {(ai.conflicts ?? []).length > 0 && (
+            <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-3">
+              <p className="text-[10px] text-yellow-400 uppercase mb-1.5">⚠️ Conflicting Signals</p>
+              {ai.conflicts.map((c, i) => (
+                <p key={i} className="text-[10px] text-foreground/70 leading-relaxed">• {c}</p>
+              ))}
+            </div>
+          )}
+
+          {/* Risk Factors */}
+          {(ai.riskFactors ?? []).length > 0 && (
+            <div className="bg-destructive/5 border border-destructive/20 rounded-xl p-3">
+              <p className="text-[10px] text-destructive uppercase mb-1.5">🛡️ Risk Factors</p>
+              {ai.riskFactors.slice(0, 3).map((r, i) => (
+                <p key={i} className="text-[10px] text-foreground/70 leading-relaxed">• {r}</p>
+              ))}
+            </div>
+          )}
+
+          {/* Patterns */}
+          {(patterns.candlestick.length > 0 || patterns.chart.length > 0) && (
+            <div className="flex flex-wrap gap-1.5">
+              {patterns.candlestick.map(p => (
+                <span key={p} className="text-[9px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">🕯️ {p}</span>
+              ))}
+              {patterns.chart.map(p => (
+                <span key={p} className="text-[9px] px-2 py-0.5 rounded-full bg-accent/10 text-accent">📐 {p}</span>
+              ))}
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex gap-3 pb-2">
+            <button onClick={onClose} className="flex-1 py-3.5 rounded-xl bg-secondary text-foreground font-bold text-sm">
+              Close
+            </button>
+            <button
+              onClick={onExecute}
+              className={`flex-1 py-3.5 rounded-xl font-bold text-sm shadow-lg active:scale-95 transition-transform ${
+                isBullishConsensus ? 'bg-primary text-background shadow-primary/20' :
+                isBearishConsensus ? 'bg-destructive text-background shadow-destructive/20' :
+                'bg-secondary text-foreground'
+              }`}
+            >
+              Execute Trade →
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 export function ChartScreen() {
   const [symbol, setSymbol] = useState('RELIANCE-EQ');
   const [timeframe, setTimeframe] = useState('15m');
@@ -24,14 +320,47 @@ export function ChartScreen() {
   const indicators = useIndicators(symbol);
   const { analyze, analyzing, result, setResult } = useSignalAnalysis();
   const { toast } = useToast();
+
   const [showOrderModal, setShowOrderModal] = useState(false);
+  const [crossVerifying, setCrossVerifying] = useState(false);
+  const [crossVerifyResult, setCrossVerifyResult] = useState<CrossVerifyResult | null>(null);
 
   const TIMEFRAMES = ['1m', '3m', '5m', '15m', '30m', '1H', '4H', '1D'];
+
+  const TF_TO_INTERVAL: Record<string, string> = {
+    '1m': 'ONE_MINUTE', '3m': 'THREE_MINUTE', '5m': 'FIVE_MINUTE',
+    '15m': 'FIFTEEN_MINUTE', '30m': 'THIRTY_MINUTE',
+    '1H': 'ONE_HOUR', '4H': 'FOUR_HOUR', '1D': 'ONE_DAY',
+  };
 
   const handleAIAnalysis = () => {
     analyze(symbol);
     toast({ title: '🧠 Engine Analysis Started', description: `Running 20 indicators on ${symbol}...` });
   };
+
+  const handleCrossVerify = useCallback(async () => {
+    setCrossVerifying(true);
+    toast({ title: '🤖 AI Cross-Verify Started', description: `Algo engine + Gemini AI analyzing ${symbol}...` });
+    try {
+      const res = await fetch('/api/ai/cross-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol,
+          interval: TF_TO_INTERVAL[timeframe] ?? 'FIFTEEN_MINUTE',
+          exchange: 'NSE',
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Cross-verify failed');
+      setCrossVerifyResult(json as CrossVerifyResult);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Cross-verify failed';
+      toast({ title: '❌ Cross-Verify Failed', description: msg, variant: 'destructive' });
+    } finally {
+      setCrossVerifying(false);
+    }
+  }, [symbol, timeframe]);
 
   const handleExecute = () => setShowOrderModal(true);
 
@@ -43,7 +372,7 @@ export function ChartScreen() {
   const liveSignal = indicators.liveSignal;
 
   return (
-    <div className="relative min-h-screen pb-24">
+    <div className="relative min-h-screen pb-8">
       {/* Header */}
       <div className="p-4 bg-background z-20 relative">
         <div className="flex gap-2 mb-4">
@@ -122,8 +451,9 @@ export function ChartScreen() {
         )}
       </div>
 
-      {/* AI Analysis Button */}
-      <div className="p-4">
+      {/* Action Buttons — Deep Analysis + Cross-Verify side by side */}
+      <div className="p-4 space-y-2">
+        {/* Deep Signal Analysis (Algo Engine) */}
         <button
           onClick={handleAIAnalysis}
           disabled={analyzing}
@@ -137,8 +467,31 @@ export function ChartScreen() {
               <BrainCircuit className="text-[#FFD700]" size={20} />
             )}
             <span className="font-bold text-gradient-gold">
-              {analyzing ? 'Running 20 Indicators...' : 'Deep Signal Analysis'}
+              {analyzing ? 'Running 20 Indicators...' : '⚡ Deep Signal Analysis (20 Algos)'}
             </span>
+          </div>
+        </button>
+
+        {/* AI Cross-Verify Button */}
+        <button
+          onClick={handleCrossVerify}
+          disabled={crossVerifying}
+          className="w-full relative overflow-hidden rounded-xl p-[1px] active:scale-[0.98] transition-transform disabled:opacity-70"
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-accent via-[#7B5EA7] to-accent" />
+          <div className="relative bg-[#0D0D1A] h-14 rounded-[10px] flex items-center justify-center gap-2">
+            {crossVerifying ? (
+              <>
+                <Activity className="animate-pulse text-accent" size={18} />
+                <span className="font-bold text-accent text-sm">Gemini AI Analyzing...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="text-accent" size={18} />
+                <span className="font-bold text-accent text-sm">🤖 AI Cross-Verify (Gemini)</span>
+                <span className="text-[10px] bg-accent/20 text-accent px-1.5 py-0.5 rounded font-mono">FREE</span>
+              </>
+            )}
           </div>
         </button>
       </div>
@@ -201,7 +554,6 @@ export function ChartScreen() {
             )}
           </div>
 
-          {/* Pattern row */}
           {(indicators.patterns.candlestick.length > 0 || indicators.patterns.chart.length > 0) && (
             <div className="mt-3 pt-3 border-t border-border">
               <p className="text-xs text-muted-foreground mb-2">Detected Patterns</p>
@@ -218,9 +570,9 @@ export function ChartScreen() {
         </div>
       </div>
 
-      {/* Sticky Signal Result */}
+      {/* Algo Signal Result panel (after Deep Analysis) */}
       <AnimatePresence>
-        {result && (
+        {result && !crossVerifyResult && (
           <motion.div
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -234,15 +586,18 @@ export function ChartScreen() {
                 </span>
                 <span className="text-sm font-bold text-foreground">{result.confidence}% Conf.</span>
               </div>
-              <span className="text-xs font-mono font-bold text-muted-foreground">R:R 1:{result.riskReward}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono font-bold text-muted-foreground">R:R 1:{result.riskReward}</span>
+                <button onClick={() => setResult(null)} className="text-muted-foreground">
+                  <X size={14} />
+                </button>
+              </div>
             </div>
 
-            {/* Top reason */}
             {result.reasons?.[0] && (
               <p className="text-[11px] text-muted-foreground mb-3 line-clamp-2">{result.reasons[0]}</p>
             )}
 
-            {/* Trade grid */}
             <div className="grid grid-cols-3 gap-1.5 mb-3 text-xs font-mono">
               <div className="bg-input/60 rounded-lg p-2 text-center">
                 <p className="text-muted-foreground text-[10px]">Entry</p>
@@ -259,8 +614,13 @@ export function ChartScreen() {
             </div>
 
             <div className="flex gap-2">
-              <button onClick={() => setResult(null)} className="px-4 py-3 rounded-xl bg-secondary text-foreground text-sm font-bold">
-                Dismiss
+              <button
+                onClick={handleCrossVerify}
+                disabled={crossVerifying}
+                className="flex-1 py-3 rounded-xl border border-accent/30 bg-accent/10 text-accent text-xs font-bold flex items-center justify-center gap-1"
+              >
+                <Sparkles size={12} />
+                {crossVerifying ? 'Verifying...' : 'AI Verify'}
               </button>
               <button
                 onClick={handleExecute}
@@ -276,7 +636,7 @@ export function ChartScreen() {
       {/* Trade Modal */}
       <AnimatePresence>
         {showOrderModal && result && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[80] flex items-end justify-center bg-black/60 backdrop-blur-sm">
             <motion.div
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
@@ -326,6 +686,20 @@ export function ChartScreen() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* AI Cross-Verify Modal */}
+      <AnimatePresence>
+        {crossVerifyResult && (
+          <CrossVerifyModal
+            result={crossVerifyResult}
+            onClose={() => setCrossVerifyResult(null)}
+            onExecute={() => {
+              setCrossVerifyResult(null);
+              setShowOrderModal(true);
+            }}
+          />
         )}
       </AnimatePresence>
     </div>
