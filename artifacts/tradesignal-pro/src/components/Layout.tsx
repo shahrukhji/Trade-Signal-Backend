@@ -2,7 +2,7 @@ import { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
   Home, BarChart2, Zap, Briefcase, Settings, Activity,
-  ScanLine, Target, User,
+  ScanLine, Target, User, FlaskConical,
 } from 'lucide-react';
 import { useStore } from '@/store/use-store';
 
@@ -11,14 +11,15 @@ export function Layout({ children }: { children: ReactNode }) {
   const { paperMode, brokerSession, brokerIsDemo } = useStore();
 
   const tabs = [
-    { id: '/home',       icon: Home,      label: 'Home'      },
-    { id: '/charts',     icon: BarChart2,  label: 'Charts'    },
-    { id: '/signals',    icon: Zap,        label: 'Signals'   },
-    { id: '/strategies', icon: Target,     label: 'Strategy'  },
-    { id: '/scanner',    icon: ScanLine,   label: 'Scanner'   },
-    { id: '/portfolio',  icon: Briefcase,  label: 'Portfolio' },
-    { id: '/account',    icon: User,       label: 'Account'   },
-    { id: '/settings',   icon: Settings,   label: 'Settings'  },
+    { id: '/home',       icon: Home,          label: 'Home'      },
+    { id: '/charts',     icon: BarChart2,      label: 'Charts'    },
+    { id: '/signals',    icon: Zap,            label: 'Signals'   },
+    { id: '/strategies', icon: Target,         label: 'Strategy'  },
+    { id: '/scanner',    icon: ScanLine,       label: 'Scanner'   },
+    { id: '/portfolio',  icon: Briefcase,      label: 'Portfolio' },
+    { id: '/account',    icon: User,           label: 'Account'   },
+    { id: '/settings',   icon: Settings,       label: 'Settings'  },
+    { id: '/paper',      icon: FlaskConical,   label: 'Paper'     },
   ];
 
   const isConnected = !!brokerSession && !brokerIsDemo;
@@ -55,8 +56,8 @@ export function Layout({ children }: { children: ReactNode }) {
         </div>
       </main>
 
-      {/* ─── Bottom Nav — flex-shrink-0 so it is ALWAYS visible and never overlaps content ─── */}
-      <nav className="flex-shrink-0 w-full h-[60px] glass-panel border-t border-white/10 z-50">
+      {/* ─── Bottom Nav — flex-shrink-0; scrollable for 9 tabs ─────────── */}
+      <nav className="flex-shrink-0 w-full h-[60px] glass-panel border-t border-white/10 z-50 overflow-x-auto no-scrollbar">
         <div className="flex items-center h-full w-full">
           {tabs.map((tab) => {
             const Icon = tab.icon;
@@ -70,10 +71,10 @@ export function Layout({ children }: { children: ReactNode }) {
                 }`}
               >
                 <Icon
-                  size={isActive ? 18 : 16}
+                  size={isActive ? 16 : 14}
                   className={isActive ? 'mb-0.5 drop-shadow-[0_0_8px_rgba(0,191,255,0.5)]' : 'mb-0.5 opacity-70'}
                 />
-                <span className={`text-[7px] font-medium leading-none ${isActive ? 'opacity-100' : 'opacity-60'}`}>
+                <span className={`text-[6.5px] font-medium leading-none ${isActive ? 'opacity-100' : 'opacity-60'}`}>
                   {tab.label}
                 </span>
                 {isActive && (

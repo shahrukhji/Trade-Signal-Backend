@@ -13,6 +13,7 @@ import { Settings } from "@/pages/Settings";
 import { StrategyScreen } from "@/pages/StrategyScreen";
 import { ScannerScreen } from "@/pages/ScannerScreen";
 import { AccountScreen } from "@/pages/AccountScreen";
+import { PaperTrading } from "@/pages/PaperTrading";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -37,6 +38,7 @@ function Router() {
         <Route path="/portfolio" component={Portfolio} />
         <Route path="/account" component={AccountScreen} />
         <Route path="/settings" component={Settings} />
+        <Route path="/paper" component={PaperTrading} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
