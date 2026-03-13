@@ -76,6 +76,7 @@ export function Settings() {
   // Post-login data
   const [wallet, setWallet] = useState<WalletBalance | null>(null);
   const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState<string | null>(null);
   const [marketStatus, setMarketStatus] = useState(getMarketStatus());
 
   // AI form
@@ -105,14 +106,34 @@ export function Settings() {
     return () => clearInterval(t);
   }, []);
 
-  // Fetch wallet when connected
+  // Fetch wallet via backend — never uses frontend mock fallback
   const fetchWallet = useCallback(async () => {
     if (!isConnected) return;
     setWalletLoading(true);
+    setWalletError(null);
     try {
-      const bal = await angelOne.getWalletBalance();
-      setWallet(bal);
-    } catch (_) {}
+      const res = await fetch('/api/portfolio/summary');
+      const data = await res.json();
+      if (data.balance) {
+        setWallet({
+          availableCash:       data.balance.availableCash,
+          usedMargin:          data.balance.usedMargin,
+          totalMargin:         data.balance.totalNet,
+          availableMargin:     data.balance.availableMargin,
+          collateral:          data.balance.collateral,
+          totalPortfolioValue: data.balance.totalPortfolioValue,
+          todayPnL:            data.balance.todayPnL,
+          unrealizedPnL:       data.balance.unrealizedPnL,
+          utilizedAmount:      data.balance.usedMargin,
+          withdrawableBalance: data.balance.availableCash,
+        });
+      } else {
+        setWallet(null);
+        setWalletError(data.balanceError || 'Balance data unavailable from Angel One');
+      }
+    } catch (_) {
+      setWalletError('Could not reach balance API');
+    }
     setWalletLoading(false);
   }, [isConnected]);
 
@@ -162,7 +183,7 @@ export function Settings() {
         };
         setBrokerSession(session, profile, false, savedApiKey);
         toast.success(`Connected as ${clientName}`);
-        setTimeout(async () => { const bal = await angelOne.getWalletBalance(); setWallet(bal); }, 800);
+        setTimeout(fetchWallet, 800);
       } else {
         setLoginError(data.message || 'Quick Connect failed. Check your Replit secrets.');
       }
@@ -193,11 +214,7 @@ export function Settings() {
     if (result.success && result.session && result.profile) {
       setBrokerSession(result.session, result.profile, false, apiKey.trim());
       toast.success(`Connected as ${result.profile.clientName}`);
-      // Fetch wallet after connecting
-      setTimeout(async () => {
-        const bal = await angelOne.getWalletBalance();
-        setWallet(bal);
-      }, 800);
+      setTimeout(fetchWallet, 800);
     } else {
       setLoginError(result.error || 'Login failed. Verify your credentials and try again.');
     }
@@ -368,7 +385,12 @@ export function Settings() {
                         <RefreshCw size={12} className={`text-muted-foreground ${walletLoading ? 'animate-spin' : ''}`} />
                       </button>
                     </div>
-                    {wallet ? (
+                    {walletLoading ? (
+                      <div className="text-center py-4">
+                        <Loader2 size={20} className="animate-spin text-accent mx-auto mb-2" />
+                        <p className="text-xs text-muted-foreground">Fetching balance...</p>
+                      </div>
+                    ) : wallet ? (
                       <div className="grid grid-cols-2 gap-2">
                         <div className="bg-primary/5 border border-primary/20 rounded-xl p-3">
                           <p className="text-[9px] text-muted-foreground uppercase mb-1">Available Cash</p>
@@ -396,9 +418,19 @@ export function Settings() {
                         )}
                       </div>
                     ) : (
-                      <div className="text-center py-4">
-                        <Loader2 size={20} className="animate-spin text-accent mx-auto mb-2" />
-                        <p className="text-xs text-muted-foreground">Loading balance...</p>
+                      <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle size={14} className="text-orange-400 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="text-xs font-semibold text-orange-400 mb-0.5">Balance Unavailable</p>
+                            <p className="text-[10px] text-muted-foreground leading-relaxed">
+                              {walletError || 'Angel One margin API (getRMS) is not returning data for this account.'}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              This may be an API plan restriction or a temporary Angel One server issue.
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
