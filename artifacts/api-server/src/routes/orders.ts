@@ -8,8 +8,10 @@ const router = Router();
 router.post("/place", async (req, res) => {
   try {
     const broker = getBrokerFromHeader(req.headers["x-broker"] as string);
+    // forceLive=true bypasses paper mode for intentional live orders
+    const forceLive = req.body.forceLive === true || req.headers["x-force-live"] === "true";
 
-    if (isPaperMode()) {
+    if (isPaperMode() && !forceLive) {
       const { tradingsymbol, symboltoken, transactiontype, ordertype, quantity, price } = req.body;
       const order = placePaperOrder({
         symbol: tradingsymbol,
@@ -23,11 +25,61 @@ router.post("/place", async (req, res) => {
       return;
     }
 
+    // Remove internal flag before sending to broker
+    const { forceLive: _fl, ...orderBody } = req.body;
     const adapter = getAdapter(broker);
-    const result = await adapter.placeOrder(req.body);
-    res.json({ success: true, data: result });
+    const result = await adapter.placeOrder(orderBody);
+    res.json({ success: true, live: true, data: result });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Order placement failed";
+    res.status(500).json({ error: msg });
+  }
+});
+
+/**
+ * POST /api/orders/exit-position
+ * Places a closing market order for an open Angel One position.
+ * Always executes LIVE (bypasses paper mode) since it's closing a real position.
+ */
+router.post("/exit-position", async (req, res) => {
+  try {
+    const {
+      tradingSymbol, symbolToken, exchange = "NSE",
+      netQty, side, productType = "INTRADAY",
+    } = req.body as {
+      tradingSymbol: string; symbolToken: string; exchange?: string;
+      netQty: number; side: "BUY" | "SELL"; productType?: string;
+    };
+
+    if (!tradingSymbol || !symbolToken || !netQty || !side) {
+      res.status(400).json({ error: "tradingSymbol, symbolToken, netQty and side are required" });
+      return;
+    }
+
+    // To exit: BUY position → SELL; SELL position → BUY
+    const exitSide = side === "BUY" ? "SELL" : "BUY";
+    const qty = Math.abs(netQty);
+
+    const orderPayload = {
+      variety: "NORMAL",
+      tradingsymbol: tradingSymbol,
+      symboltoken: symbolToken,
+      transactiontype: exitSide,
+      exchange,
+      ordertype: "MARKET",
+      producttype: productType,
+      duration: "DAY",
+      price: "0",
+      squareoff: "0",
+      stoploss: "0",
+      quantity: String(qty),
+    };
+
+    const result = await angelone.placeOrder(orderPayload);
+    console.log(`[EXIT] ${exitSide} ${qty} ${tradingSymbol} — response:`, JSON.stringify(result));
+    res.json({ success: true, exitSide, qty, data: result });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Exit position failed";
     res.status(500).json({ error: msg });
   }
 });

@@ -1,13 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useStore } from '@/store/use-store';
 import { angelOne } from '@/broker/angelOne';
 import type { Holding, Position, OrderBook } from '@/broker/angelOne';
 import {
   PieChart, Wallet, ArrowUpRight, ArrowDownRight, History,
   RefreshCw, TrendingUp, TrendingDown, Clock, CheckCircle2,
-  XCircle, AlertCircle, Loader2, BarChart3,
+  XCircle, AlertCircle, Loader2, BarChart3, Zap, LogOut,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useToast } from '@/hooks/use-toast';
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
+
+interface LivePosition {
+  symbol: string;
+  tradingSymbol: string;
+  symbolToken: string;
+  exchange: string;
+  productType: string;
+  side: 'BUY' | 'SELL';
+  netQty: number;
+  avgPrice: number;
+  ltp: number;
+  unrealisedPnl: number;
+  pnlPct: number;
+  dayChange: number;
+}
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n);
@@ -33,6 +51,77 @@ function StatusBadge({ status }: { status: OrderBook['status'] }) {
 
 export function Portfolio() {
   const [tab, setTab] = useState('Holdings');
+  const { toast } = useToast();
+
+  // ── Live Positions state ─────────────────────────────────────────────────
+  const [livePositions, setLivePositions] = useState<LivePosition[]>([]);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const [liveError, setLiveError] = useState('');
+  const [exitingSymbols, setExitingSymbols] = useState<Set<string>>(new Set());
+
+  const fetchLivePositions = useCallback(async () => {
+    setLiveLoading(true);
+    setLiveError('');
+    try {
+      const res = await fetch(`${BASE}/api/portfolio/live-positions`);
+      const json = await res.json();
+      if (json.success) setLivePositions(json.positions ?? []);
+      else setLiveError(json.error ?? 'Failed to fetch live positions');
+    } catch {
+      setLiveError('Network error — cannot reach server');
+    } finally {
+      setLiveLoading(false);
+    }
+  }, []);
+
+  const exitPosition = useCallback(async (pos: LivePosition) => {
+    setExitingSymbols(prev => new Set([...prev, pos.tradingSymbol]));
+    try {
+      const res = await fetch(`${BASE}/api/orders/exit-position`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradingSymbol: pos.tradingSymbol,
+          symbolToken: pos.symbolToken,
+          exchange: pos.exchange,
+          netQty: pos.netQty,
+          side: pos.side,
+          productType: pos.productType,
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: '✅ Exit Order Placed',
+          description: `${json.exitSide} ${json.qty} × ${pos.symbol} sent to Angel One.`,
+        });
+        // Refresh positions after exit
+        setTimeout(fetchLivePositions, 1500);
+      } else {
+        throw new Error(json.error ?? 'Exit failed');
+      }
+    } catch (err) {
+      toast({
+        title: '❌ Exit Failed',
+        description: err instanceof Error ? err.message : 'Exit order failed',
+        variant: 'destructive',
+      });
+    } finally {
+      setExitingSymbols(prev => {
+        const next = new Set(prev);
+        next.delete(pos.tradingSymbol);
+        return next;
+      });
+    }
+  }, [fetchLivePositions, toast]);
+
+  // Auto-refresh live positions every 10s when on Live tab
+  useEffect(() => {
+    if (tab !== 'Live') return;
+    fetchLivePositions();
+    const interval = setInterval(fetchLivePositions, 10_000);
+    return () => clearInterval(interval);
+  }, [tab, fetchLivePositions]);
   const {
     paperMode, brokerSession, brokerIsDemo, brokerApiKey,
     holdings, positions, orderBook, walletBalance,
@@ -181,7 +270,7 @@ export function Portfolio() {
 
       {/* ── Tabs ── */}
       <div className="flex bg-input p-1 rounded-xl mb-4">
-        {['Holdings', 'Orders', 'History'].map((t) => (
+        {['Holdings', 'Live', 'Orders', 'History'].map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -307,7 +396,134 @@ export function Portfolio() {
             </>
           )}
 
-          {/* ORDERS */}
+          {/* ── Live Trades ── */}
+          {tab === 'Live' && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Zap size={16} className="text-orange-400" />
+                  <span className="text-sm font-bold text-foreground">Live Positions</span>
+                  {livePositions.length > 0 && (
+                    <span className="text-[10px] bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-full px-2 py-0.5 font-bold">
+                      {livePositions.length} Open
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={fetchLivePositions}
+                  disabled={liveLoading}
+                  className="p-2 bg-white/5 rounded-xl border border-white/10 text-muted-foreground hover:text-foreground transition"
+                >
+                  <RefreshCw size={12} className={liveLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              {/* Live P&L Summary Bar */}
+              {livePositions.length > 0 && (() => {
+                const totalPnl = livePositions.reduce((s, p) => s + p.unrealisedPnl, 0);
+                return (
+                  <div className={`p-4 rounded-2xl border ${totalPnl >= 0 ? 'bg-primary/10 border-primary/20' : 'bg-destructive/10 border-destructive/20'}`}>
+                    <p className="text-xs text-muted-foreground mb-1">Total Unrealised P&L</p>
+                    <p className={`text-2xl font-bold font-mono ${totalPnl >= 0 ? 'text-primary' : 'text-destructive'}`}>
+                      {totalPnl >= 0 ? '+' : ''}₹{fmt(Math.abs(totalPnl))}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Auto-refreshes every 10s • Last: {new Date().toLocaleTimeString('en-IN')}
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {liveLoading && livePositions.length === 0 && (
+                <div className="text-center py-10">
+                  <Loader2 size={28} className="animate-spin text-orange-400 mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">Fetching live positions…</p>
+                </div>
+              )}
+
+              {liveError && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-2xl p-4 flex gap-2 items-start">
+                  <AlertCircle size={14} className="text-destructive shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-destructive mb-0.5">Could not load positions</p>
+                    <p className="text-xs text-muted-foreground">{liveError}</p>
+                  </div>
+                </div>
+              )}
+
+              {!liveLoading && !liveError && livePositions.length === 0 && (
+                <div className="text-center py-12">
+                  <Zap size={36} className="mx-auto text-muted-foreground mb-3 opacity-30" />
+                  <p className="text-sm text-muted-foreground">No open positions</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Your live Angel One trades will appear here</p>
+                </div>
+              )}
+
+              {livePositions.map((pos) => {
+                const isExiting = exitingSymbols.has(pos.tradingSymbol);
+                const isProfit = pos.unrealisedPnl >= 0;
+                return (
+                  <motion.div
+                    key={pos.tradingSymbol}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-card/50 border border-white/5 rounded-2xl p-4"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${pos.side === 'BUY' ? 'bg-primary/20 text-primary' : 'bg-destructive/20 text-destructive'}`}>
+                          {pos.side}
+                        </div>
+                        <div>
+                          <span className="text-sm font-bold">{pos.symbol}</span>
+                          <span className="text-[10px] text-muted-foreground ml-1.5">{pos.productType}</span>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => exitPosition(pos)}
+                        disabled={isExiting}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-bold bg-destructive/15 text-destructive border border-destructive/20 hover:bg-destructive/25 disabled:opacity-50 transition"
+                      >
+                        {isExiting
+                          ? <><Loader2 size={10} className="animate-spin" /> Exiting…</>
+                          : <><LogOut size={10} /> Exit</>
+                        }
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-0.5">Qty</p>
+                        <p className="text-sm font-mono font-bold">{Math.abs(pos.netQty)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-0.5">Avg Price</p>
+                        <p className="text-sm font-mono font-bold">₹{fmt(pos.avgPrice)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-muted-foreground mb-0.5">LTP</p>
+                        <p className="text-sm font-mono font-bold">₹{fmt(pos.ltp)}</p>
+                      </div>
+                    </div>
+                    <div className={`flex items-center justify-between mt-3 pt-2.5 border-t ${isProfit ? 'border-primary/10' : 'border-destructive/10'}`}>
+                      <div className="flex items-center gap-1">
+                        {isProfit
+                          ? <TrendingUp size={12} className="text-primary" />
+                          : <TrendingDown size={12} className="text-destructive" />
+                        }
+                        <span className={`text-xs font-bold font-mono ${isProfit ? 'text-primary' : 'text-destructive'}`}>
+                          {isProfit ? '+' : ''}₹{fmt(Math.abs(pos.unrealisedPnl))}
+                        </span>
+                      </div>
+                      <span className={`text-xs font-bold ${isProfit ? 'text-primary' : 'text-destructive'}`}>
+                        {isProfit ? '+' : ''}{pos.pnlPct.toFixed(2)}%
+                      </span>
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+
           {tab === 'Orders' && (
             <>
               {loading ? (

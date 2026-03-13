@@ -1,9 +1,11 @@
-import { useState, useCallback } from 'react';
-import { Search, BrainCircuit, Activity, Plus, TrendingUp, TrendingDown, Sparkles, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { useState, useCallback, useRef } from 'react';
+import { Search, BrainCircuit, Activity, Plus, TrendingUp, TrendingDown, Sparkles, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp, X, Zap, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartWidget } from '@/components/ChartWidget';
 import { useMarketData, useIndicators, useSignalAnalysis } from '@/hooks/use-trading';
 import { useToast } from '@/hooks/use-toast';
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 const SIGNAL_COLORS: Record<string, string> = {
   STRONG_BUY: 'text-primary', BUY: 'text-primary', WEAK_BUY: 'text-primary',
@@ -322,6 +324,11 @@ export function ChartScreen() {
   const { toast } = useToast();
 
   const [showOrderModal, setShowOrderModal] = useState(false);
+  const [orderMode, setOrderMode] = useState<'paper' | 'live'>('paper');
+  const [placing, setPlacing] = useState(false);
+  const qtyRef   = useRef<HTMLInputElement>(null);
+  const priceRef = useRef<HTMLInputElement>(null);
+  const slRef    = useRef<HTMLInputElement>(null);
   const [crossVerifying, setCrossVerifying] = useState(false);
   const [crossVerifyResult, setCrossVerifyResult] = useState<CrossVerifyResult | null>(null);
 
@@ -643,45 +650,181 @@ export function ChartScreen() {
               exit={{ y: '100%' }}
               className="w-full max-w-md bg-card rounded-t-3xl border-t border-border p-6 shadow-2xl"
             >
-              <h2 className="text-xl font-bold mb-1">Place Order</h2>
-              <p className="text-xs text-muted-foreground mb-4">{result.summary?.slice(0, 100)}...</p>
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="text-xl font-bold">Place Order</h2>
+                <button onClick={() => setShowOrderModal(false)} className="p-1 text-muted-foreground hover:text-foreground">
+                  <X size={18} />
+                </button>
+              </div>
 
-              <div className="space-y-3 mb-6">
-                <div className="flex justify-between p-3 bg-input rounded-xl">
+              {/* Paper / Live toggle */}
+              <div className="flex gap-2 mb-4 mt-3">
+                <button
+                  onClick={() => setOrderMode('paper')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border transition-all ${
+                    orderMode === 'paper'
+                      ? 'bg-accent/10 border-accent/40 text-accent'
+                      : 'bg-white/5 border-white/10 text-muted-foreground'
+                  }`}
+                >
+                  <Shield size={14} /> Paper Trade
+                </button>
+                <button
+                  onClick={() => setOrderMode('live')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-bold border transition-all ${
+                    orderMode === 'live'
+                      ? 'bg-orange-500/10 border-orange-500/40 text-orange-400'
+                      : 'bg-white/5 border-white/10 text-muted-foreground'
+                  }`}
+                >
+                  <Zap size={14} /> Live Order
+                </button>
+              </div>
+
+              {/* Live warning */}
+              {orderMode === 'live' && (
+                <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3 mb-4 flex gap-2 items-start">
+                  <AlertCircle size={14} className="text-orange-400 shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-orange-300 leading-relaxed">
+                    <span className="font-bold">REAL MONEY ALERT:</span> This will place an actual order on your Angel One account. Market hours: 9:15 AM – 3:30 PM.
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-3 mb-5">
+                <div className="flex justify-between items-center p-3 bg-input rounded-xl">
                   <span className="text-muted-foreground text-sm">Symbol</span>
-                  <span className="font-bold">{result.symbol}</span>
+                  <span className="font-bold font-mono">{result.symbol?.replace('-EQ', '')}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 bg-input rounded-xl">
+                  <span className="text-muted-foreground text-sm">Signal</span>
+                  <span className={`text-sm font-bold ${result.signal?.includes('SELL') ? 'text-destructive' : 'text-primary'}`}>
+                    {result.signal?.includes('SELL') ? '🔴 SHORT' : '🟢 BUY'}
+                  </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="p-3 bg-input rounded-xl">
                     <span className="text-muted-foreground text-xs block mb-1">Entry Price</span>
-                    <input type="number" defaultValue={result.entry} className="bg-transparent w-full font-mono font-bold text-foreground outline-none" />
+                    <input
+                      ref={priceRef}
+                      type="number"
+                      defaultValue={result.entry ?? currentPrice}
+                      step="0.05"
+                      className="bg-transparent w-full font-mono font-bold text-foreground outline-none text-sm"
+                    />
                   </div>
                   <div className="p-3 bg-input rounded-xl">
                     <span className="text-muted-foreground text-xs block mb-1">Stop Loss</span>
-                    <input type="number" defaultValue={result.stopLoss} className="bg-transparent w-full font-mono font-bold text-destructive outline-none" />
+                    <input
+                      ref={slRef}
+                      type="number"
+                      defaultValue={result.stopLoss}
+                      step="0.05"
+                      className="bg-transparent w-full font-mono font-bold text-destructive outline-none text-sm"
+                    />
                   </div>
                 </div>
                 <div className="p-3 bg-input rounded-xl flex justify-between items-center">
                   <span className="text-muted-foreground text-sm">Quantity</span>
-                  <input type="number" defaultValue={100} className="bg-transparent w-24 text-right font-mono font-bold text-foreground outline-none border-b border-border focus:border-accent" />
+                  <input
+                    ref={qtyRef}
+                    type="number"
+                    defaultValue={1}
+                    min="1"
+                    className="bg-transparent w-20 text-right font-mono font-bold text-foreground outline-none border-b border-border focus:border-accent text-sm"
+                  />
                 </div>
               </div>
 
               <div className="flex gap-3">
-                <button onClick={() => setShowOrderModal(false)} className="flex-1 py-3.5 rounded-xl bg-secondary text-foreground font-bold">
+                <button
+                  onClick={() => setShowOrderModal(false)}
+                  disabled={placing}
+                  className="flex-1 py-3.5 rounded-xl bg-secondary text-foreground font-bold disabled:opacity-50"
+                >
                   Cancel
                 </button>
                 <button
-                  onClick={() => {
-                    toast({ title: '✅ Order Placed', description: 'Your paper trade was submitted.' });
-                    setShowOrderModal(false);
-                    setResult(null);
+                  disabled={placing}
+                  onClick={async () => {
+                    const qty = Number(qtyRef.current?.value ?? 1);
+                    const price = Number(priceRef.current?.value ?? currentPrice);
+                    const isSell = result.signal?.includes('SELL');
+                    const sym = result.symbol ?? symbol;
+
+                    // Look up symboltoken from NIFTY50 list
+                    const tokenLookup: Record<string, string> = {
+                      'RELIANCE-EQ':'2885','TCS-EQ':'11536','HDFCBANK-EQ':'1333','INFY-EQ':'1594',
+                      'ICICIBANK-EQ':'4963','SBIN-EQ':'3045','BAJFINANCE-EQ':'317','BHARTIARTL-EQ':'10604',
+                      'KOTAKBANK-EQ':'1922','WIPRO-EQ':'3787','HCLTECH-EQ':'7229','AXISBANK-EQ':'5900',
+                      'ASIANPAINT-EQ':'236','MARUTI-EQ':'10999','SUNPHARMA-EQ':'3351','TATASTEEL-EQ':'3499',
+                      'ULTRACEMCO-EQ':'11532','POWERGRID-EQ':'14977','NTPC-EQ':'11630','NESTLEIND-EQ':'17963',
+                      'TECHM-EQ':'13538','TITAN-EQ':'3506','JSWSTEEL-EQ':'11723','LT-EQ':'11483',
+                      'M&M-EQ':'2031','INDUSINDBK-EQ':'5258','TATACONSUM-EQ':'3432','ONGC-EQ':'2475',
+                      'HINDUNILVR-EQ':'1394','ITC-EQ':'1660','CIPLA-EQ':'694','DRREDDY-EQ':'881',
+                      'EICHERMOT-EQ':'910','GRASIM-EQ':'1232','HDFCLIFE-EQ':'467','SBILIFE-EQ':'21808',
+                      'BPCL-EQ':'526','BRITANNIA-EQ':'547','APOLLOHOSP-EQ':'157','TRENT-EQ':'1964',
+                      'SHRIRAMFIN-EQ':'4306','HINDALCO-EQ':'1363','COALINDIA-EQ':'20374',
+                      'ADANIPORTS-EQ':'15083','ADANIENT-EQ':'25','BAJAJFINSV-EQ':'16675',
+                      'BAJAJ-AUTO-EQ':'16669','HEROMOTOCO-EQ':'1348','DIVISLAB-EQ':'10940',
+                    };
+                    const symboltoken = tokenLookup[sym] ?? '';
+
+                    setPlacing(true);
+                    try {
+                      const body = {
+                        variety: orderMode === 'live' ? 'NORMAL' : 'NORMAL',
+                        tradingsymbol: sym,
+                        symboltoken,
+                        transactiontype: isSell ? 'SELL' : 'BUY',
+                        exchange: 'NSE',
+                        ordertype: 'LIMIT',
+                        producttype: 'INTRADAY',
+                        duration: 'DAY',
+                        price: String(price),
+                        squareoff: '0',
+                        stoploss: String(slRef.current?.value ?? 0),
+                        quantity: String(qty),
+                        forceLive: orderMode === 'live',
+                      };
+                      const res = await fetch(`${BASE}/api/orders/place`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                      });
+                      const json = await res.json();
+                      if (json.success) {
+                        toast({
+                          title: orderMode === 'live' ? '⚡ Live Order Placed!' : '✅ Paper Order Placed!',
+                          description: orderMode === 'live'
+                            ? `${isSell ? 'SELL' : 'BUY'} ${qty} × ${sym.replace('-EQ','')} sent to Angel One.`
+                            : `Simulated ${isSell ? 'SELL' : 'BUY'} ${qty} × ${sym.replace('-EQ','')} in paper mode.`,
+                        });
+                        setShowOrderModal(false);
+                        setResult(null);
+                      } else {
+                        throw new Error(json.error ?? 'Order failed');
+                      }
+                    } catch (err) {
+                      const msg = err instanceof Error ? err.message : 'Order failed';
+                      toast({ title: '❌ Order Failed', description: msg, variant: 'destructive' });
+                    } finally {
+                      setPlacing(false);
+                    }
                   }}
-                  className={`flex-1 py-3.5 rounded-xl font-bold shadow-lg ${
-                    result.signal.includes('SELL') ? 'bg-destructive text-background shadow-destructive/20' : 'bg-primary text-background shadow-primary/20'
+                  className={`flex-1 py-3.5 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 disabled:opacity-60 ${
+                    orderMode === 'live'
+                      ? 'bg-orange-500 text-white shadow-orange-500/20'
+                      : result.signal?.includes('SELL')
+                        ? 'bg-destructive text-background shadow-destructive/20'
+                        : 'bg-primary text-background shadow-primary/20'
                   }`}
                 >
-                  Confirm {result.signal.includes('SELL') ? 'SHORT' : 'BUY'}
+                  {placing ? (
+                    <><span className="animate-spin">⏳</span> Placing...</>
+                  ) : (
+                    <>{orderMode === 'live' ? <Zap size={14} /> : <Shield size={14} />} Confirm {result.signal?.includes('SELL') ? 'SHORT' : 'BUY'}</>
+                  )}
                 </button>
               </div>
             </motion.div>
