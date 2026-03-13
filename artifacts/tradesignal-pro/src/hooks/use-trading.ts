@@ -1,138 +1,159 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { generateLiveSignal, LiveSignal, OHLCV } from '@/engine';
 
-// ─── Realistic OHLCV candle generator ───
-function generateOHLCV(symbol: string, count: number = 250): OHLCV[] {
-  const seedPrice: Record<string, number> = {
-    'RELIANCE-EQ': 2950, 'INFY-EQ': 1420, 'TCS-EQ': 3850,
-    'HDFCBANK-EQ': 1465, 'ICICIBANK-EQ': 1120, 'SBIN-EQ': 830,
-    'BAJFINANCE-EQ': 6800, 'TITAN-EQ': 3400, 'ITC-EQ': 470,
-    'WIPRO-EQ': 520, 'AXISBANK-EQ': 1190, 'KOTAKBANK-EQ': 1750,
-    'TATAMOTORS-EQ': 1020, 'ADANIENT-EQ': 2480, 'MARUTI-EQ': 12500,
-  };
-  let price = seedPrice[symbol] || 1000;
-  const candles: OHLCV[] = [];
-  let time = Math.floor(Date.now() / 1000) - count * 900;
-  const volatility = price * 0.006;
-  let trend = 0;
+// ─── Interval mapping ─────────────────────────────────────────────────────────
+const INTERVAL_MAP: Record<string, string> = {
+  '1m': 'ONE_MINUTE', '3m': 'THREE_MINUTE', '5m': 'FIVE_MINUTE',
+  '15m': 'FIFTEEN_MINUTE', '30m': 'THIRTY_MINUTE', '1h': 'ONE_HOUR', '1d': 'ONE_DAY',
+};
 
-  for (let i = 0; i < count; i++) {
-    trend = trend * 0.95 + (Math.random() - 0.48) * 0.5;
-    const open = price;
-    const change = trend * volatility + (Math.random() - 0.5) * volatility;
-    const close = Math.max(open * 0.97, Math.min(open * 1.03, open + change));
-    const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-    const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-    const isBull = close > open;
-    const baseVol = 500000 + Math.random() * 500000;
-    const volume = Math.floor(baseVol * (isBull ? 1.2 : 0.8) * (1 + Math.abs(change) / price * 10));
-    candles.push({
-      time: time + i * 900,
-      open: Math.round(open * 100) / 100,
-      high: Math.round(high * 100) / 100,
-      low: Math.round(low * 100) / 100,
-      close: Math.round(close * 100) / 100,
-      volume,
+// Returns lookback days per interval (to request enough data)
+const LOOKBACK_DAYS: Record<string, number> = {
+  '1m': 5, '3m': 10, '5m': 15, '15m': 90, '30m': 90, '1h': 90, '1d': 365,
+};
+
+function fmtDate(d: Date): string {
+  const p = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function isMarketOpen(): boolean {
+  const now = new Date();
+  const day = now.getDay();
+  const h = now.getHours(), m = now.getMinutes();
+  const totalMin = h * 60 + m;
+  return day >= 1 && day <= 5 && totalMin >= 9 * 60 + 15 && totalMin <= 15 * 60 + 30;
+}
+
+// ─── Candle fetch with LTP update ─────────────────────────────────────────────
+async function fetchCandlesFromAPI(symbol: string, interval: string): Promise<OHLCV[]> {
+  const sym = symbol.replace('-EQ', '');
+  const days = LOOKBACK_DAYS[interval] || 90;
+  const now = new Date();
+  const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  const apiInterval = INTERVAL_MAP[interval] || 'FIFTEEN_MINUTE';
+
+  const res = await fetch('/api/market/candles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbol: sym, interval: apiInterval, fromdate: fmtDate(from), todate: fmtDate(now) }),
+  });
+
+  if (!res.ok) throw new Error(`Candle fetch failed: ${res.status}`);
+  const json = await res.json();
+  if (!json.success || !Array.isArray(json.candles)) throw new Error(json.error || 'No candle data');
+  return json.candles as OHLCV[];
+}
+
+async function fetchLiveQuote(symbol: string): Promise<number | null> {
+  try {
+    const sym = symbol.replace('-EQ', '');
+    const res = await fetch('/api/market/quote', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: [sym], exchange: 'NSE' }),
     });
-    price = close;
+    if (!res.ok) return null;
+    const json = await res.json();
+    const fetched = json.data?.fetched;
+    if (Array.isArray(fetched) && fetched.length > 0 && fetched[0].ltp) {
+      return Number(fetched[0].ltp);
+    }
+    return null;
+  } catch {
+    return null;
   }
-  return candles;
-}
-
-// ─── Cache per symbol ───
-const candleCache: Record<string, OHLCV[]> = {};
-
-function getCandlesForSymbol(symbol: string): OHLCV[] {
-  if (!candleCache[symbol]) candleCache[symbol] = generateOHLCV(symbol, 250);
-  return candleCache[symbol];
-}
-
-function appendLiveTick(symbol: string): OHLCV[] {
-  const candles = candleCache[symbol];
-  if (!candles || candles.length === 0) return [];
-  const last = candles[candles.length - 1];
-  const volatility = last.close * 0.002;
-  const change = (Math.random() - 0.48) * volatility;
-  const newClose = Math.round((last.close + change) * 100) / 100;
-  const updated: OHLCV = {
-    ...last,
-    close: newClose,
-    high: Math.max(last.high, newClose),
-    low: Math.min(last.low, newClose),
-    volume: last.volume + Math.floor(Math.random() * 8000),
-  };
-  candles[candles.length - 1] = updated;
-  return [...candles];
 }
 
 // ═══════════════════════════════════════
-// useMarketData — with live engine signals
+// useMarketData — real Angel One candles + live LTP polling
 // ═══════════════════════════════════════
 
-export function useMarketData(symbol: string, _timeframe: string = '15m') {
+export function useMarketData(symbol: string, timeframe: string = '15m') {
   const [data, setData] = useState<OHLCV[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [currentPrice, setCurrentPrice] = useState(0);
   const [change, setChange] = useState(0);
   const [liveSignal, setLiveSignal] = useState<LiveSignal | null>(null);
 
+  // Fetch historical candles + compute initial signal
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    const candles = getCandlesForSymbol(symbol);
-    setData([...candles]);
-    const last = candles[candles.length - 1];
-    const first = candles[0];
-    setCurrentPrice(last.close);
-    setChange(((last.close - first.close) / first.close) * 100);
+    setError(null);
 
-    // Compute initial signal
-    try {
-      const sig = generateLiveSignal(candles, symbol.replace('-EQ', ''), symbol, 'NSE', '15m');
-      setLiveSignal(sig);
-    } catch (e) {
-      console.warn('Signal engine error:', e);
-    }
-    setLoading(false);
-
-    // Live tick every 3s
-    const interval = setInterval(() => {
-      const updated = appendLiveTick(symbol);
-      if (updated.length === 0) return;
-      setData([...updated]);
-      const last = updated[updated.length - 1];
-      setCurrentPrice(last.close);
-      setChange(((last.close - updated[0].close) / updated[0].close) * 100);
-
-      // Re-run engine every 5 ticks approximately
-      if (Math.random() < 0.2) {
+    fetchCandlesFromAPI(symbol, timeframe)
+      .then(candles => {
+        if (cancelled || candles.length === 0) return;
+        setData(candles);
+        const last = candles[candles.length - 1];
+        const first = candles[0];
+        setCurrentPrice(last.close);
+        setChange(((last.close - first.close) / first.close) * 100);
         try {
-          const sig = generateLiveSignal(updated, symbol.replace('-EQ', ''), symbol, 'NSE', '15m');
+          const sym = symbol.replace('-EQ', '');
+          const sig = generateLiveSignal(candles, sym, sym, 'NSE', timeframe);
           setLiveSignal(sig);
-        } catch (e) { /* silent */ }
+        } catch { /* signal engine errors are non-fatal */ }
+      })
+      .catch(err => {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load market data');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [symbol, timeframe]);
+
+  // Poll live LTP every 15s during market hours
+  useEffect(() => {
+    if (data.length === 0 || !isMarketOpen()) return;
+
+    const poll = async () => {
+      const ltp = await fetchLiveQuote(symbol);
+      if (ltp && ltp > 0) {
+        setCurrentPrice(ltp);
+        setData(prev => {
+          if (prev.length === 0) return prev;
+          const updated = [...prev];
+          const last = { ...updated[updated.length - 1], close: ltp };
+          last.high = Math.max(last.high, ltp);
+          last.low = Math.min(last.low, ltp);
+          updated[updated.length - 1] = last;
+          setChange(((ltp - updated[0].close) / updated[0].close) * 100);
+          return updated;
+        });
       }
-    }, 3000);
+    };
 
-    return () => clearInterval(interval);
-  }, [symbol]);
+    poll();
+    const id = setInterval(poll, 15_000);
+    return () => clearInterval(id);
+  }, [symbol, data.length]);
 
-  return { data, loading, currentPrice, change, liveSignal };
+  return { data, loading, error, currentPrice, change, liveSignal };
 }
 
 // ═══════════════════════════════════════
-// useIndicators — real engine values
+// useIndicators — real candle data
 // ═══════════════════════════════════════
 
 export function useIndicators(symbol: string = 'RELIANCE-EQ') {
   const [indicators, setIndicators] = useState<LiveSignal | null>(null);
 
   useEffect(() => {
-    const candles = getCandlesForSymbol(symbol);
-    try {
-      const sig = generateLiveSignal(candles, symbol.replace('-EQ', ''), symbol, 'NSE', '15m');
-      setIndicators(sig);
-    } catch (e) {
-      console.warn('Indicator error:', e);
-    }
+    let cancelled = false;
+    fetchCandlesFromAPI(symbol, '15m').then(candles => {
+      if (cancelled || candles.length === 0) return;
+      try {
+        const sym = symbol.replace('-EQ', '');
+        const sig = generateLiveSignal(candles, sym, sym, 'NSE', '15m');
+        setIndicators(sig);
+      } catch { /* ignore */ }
+    }).catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
   }, [symbol]);
 
   if (!indicators) {
@@ -161,7 +182,7 @@ export function useIndicators(symbol: string = 'RELIANCE-EQ') {
 }
 
 // ═══════════════════════════════════════
-// useSignalAnalysis — real engine scoring
+// useSignalAnalysis — real candle data
 // ═══════════════════════════════════════
 
 export function useSignalAnalysis() {
@@ -170,12 +191,10 @@ export function useSignalAnalysis() {
 
   const analyze = useCallback(async (symbol: string) => {
     setAnalyzing(true);
-    await new Promise(r => setTimeout(r, 800));
-
     try {
-      const candles = getCandlesForSymbol(symbol);
-      const sig = generateLiveSignal(candles, symbol.replace('-EQ', ''), symbol, 'NSE', '15m');
-
+      const candles = await fetchCandlesFromAPI(symbol, '15m');
+      const sym = symbol.replace('-EQ', '');
+      const sig = generateLiveSignal(candles, sym, sym, 'NSE', '15m');
       setResult({
         symbol: sig.symbol,
         signal: sig.signal,
@@ -208,10 +227,10 @@ export function useSignalAnalysis() {
 }
 
 // ═══════════════════════════════════════
-// useMultiSignals — signals for Signals tab
+// useMultiSignals — real candles for top 8 stocks, refreshes every 5 min
 // ═══════════════════════════════════════
 
-const TRACKED_SYMBOLS = [
+const TRACKED_STOCKS = [
   { symbol: 'RELIANCE-EQ', name: 'Reliance Industries', exchange: 'NSE' },
   { symbol: 'INFY-EQ', name: 'Infosys Ltd', exchange: 'NSE' },
   { symbol: 'TCS-EQ', name: 'Tata Consultancy', exchange: 'NSE' },
@@ -219,7 +238,7 @@ const TRACKED_SYMBOLS = [
   { symbol: 'ICICIBANK-EQ', name: 'ICICI Bank', exchange: 'NSE' },
   { symbol: 'SBIN-EQ', name: 'State Bank of India', exchange: 'NSE' },
   { symbol: 'BAJFINANCE-EQ', name: 'Bajaj Finance', exchange: 'NSE' },
-  { symbol: 'TITAN-EQ', name: 'Titan Company', exchange: 'NSE' },
+  { symbol: 'BHARTIARTL-EQ', name: 'Bharti Airtel', exchange: 'NSE' },
 ];
 
 export function useMultiSignals() {
@@ -228,33 +247,41 @@ export function useMultiSignals() {
   const [lastUpdate, setLastUpdate] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const computeSignals = useCallback(() => {
-    const results: LiveSignal[] = [];
-    for (const stock of TRACKED_SYMBOLS) {
-      try {
-        const candles = getCandlesForSymbol(stock.symbol);
-        // Advance last candle slightly
-        appendLiveTick(stock.symbol);
-        const sig = generateLiveSignal([...candles], stock.symbol.replace('-EQ', ''), stock.name, stock.exchange, '15m');
-        results.push(sig);
-      } catch (e) { /* skip */ }
-    }
-    const sorted = results.sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
-    setSignals(sorted);
-    setLastUpdate(Date.now());
+  const fetchSignals = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Fetch candles for all tracked stocks in parallel
+      const results = await Promise.allSettled(
+        TRACKED_STOCKS.map(async (stock) => {
+          const candles = await fetchCandlesFromAPI(stock.symbol, '15m');
+          if (candles.length < 30) throw new Error('Insufficient data');
+          const sym = stock.symbol.replace('-EQ', '');
+          return generateLiveSignal(candles, sym, stock.name, stock.exchange, '15m');
+        })
+      );
+
+      const sigs: LiveSignal[] = [];
+      for (const r of results) {
+        if (r.status === 'fulfilled') sigs.push(r.value);
+      }
+
+      const sorted = sigs.sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+      setSignals(sorted);
+      setLastUpdate(Date.now());
+    } catch { /* ignore overall failure */ }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    computeSignals();
-    intervalRef.current = setInterval(computeSignals, 30000);
+    fetchSignals();
+    intervalRef.current = setInterval(fetchSignals, 5 * 60 * 1000); // every 5 min
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [computeSignals]);
+  }, [fetchSignals]);
 
   const refresh = useCallback(() => {
     setLoading(true);
-    setTimeout(computeSignals, 200);
-  }, [computeSignals]);
+    setTimeout(fetchSignals, 100);
+  }, [fetchSignals]);
 
   return { signals, loading, lastUpdate, refresh };
 }
