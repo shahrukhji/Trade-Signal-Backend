@@ -225,7 +225,7 @@ export function ChartScreen() {
             initial={{ y: 100, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 100, opacity: 0 }}
-            className="fixed bottom-[64px] w-full max-w-md bg-card/95 backdrop-blur-xl border-t border-border p-4 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] z-40"
+            className="fixed bottom-[60px] w-full max-w-md bg-card/95 backdrop-blur-xl border-t border-border p-4 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] z-[60]"
           >
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
