@@ -95,6 +95,7 @@ export function Portfolio() {
   const [liveError, setLiveError] = useState('');
   const [exitingSymbols, setExitingSymbols] = useState<Set<string>>(new Set());
 
+
   // ── Session countdown ─────────────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
@@ -112,7 +113,7 @@ export function Portfolio() {
     return () => clearInterval(id);
   }, [brokerSession]);
 
-  // ── Fetch ALL data from backend (never from frontend broker client) ────────
+  // ── Fetch all portfolio data from backend ────────────────────────────────
   const fetchSummary = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
     else setLoading(true);
@@ -182,13 +183,12 @@ export function Portfolio() {
   const orders   = summary?.orders ?? [];
   const balance  = summary?.balance ?? null;
 
-  // Portfolio value priority: getRMS net > calculated from holdings
   const totalInvested = holdings.reduce((s, h) => s + h.investedValue, 0);
   const totalCurrent  = holdings.reduce((s, h) => s + h.currentValue,  0);
   const totalPnL      = totalCurrent - totalInvested;
   const totalPnLPct   = totalInvested > 0 ? (totalPnL / totalInvested) * 100 : 0;
 
-  // Show real net from Angel One balance if available, otherwise sum holdings
+  // Portfolio value: getRMS net → calculated from holdings → null
   const portfolioValue = balance?.totalNet ?? (holdings.length > 0 ? totalCurrent : null);
   const availCash      = balance?.availableCash ?? null;
   const todayPnL       = balance?.todayPnL ?? null;

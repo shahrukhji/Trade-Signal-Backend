@@ -1,14 +1,23 @@
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
   Home, BarChart2, Zap, Briefcase, Settings,
   ScanLine, Target, FlaskConical, Activity,
 } from 'lucide-react';
 import { useStore } from '@/store/use-store';
+import { angelOne } from '@/broker/angelOne';
 
 export function Layout({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const { paperMode, brokerSession, brokerIsDemo } = useStore();
+  const { paperMode, brokerSession, brokerIsDemo, brokerApiKey } = useStore();
+
+  // Restore broker session into the frontend angelOne client on every mount/session change.
+  // This ensures the client has the JWT even when the user navigates directly to any page.
+  useEffect(() => {
+    if (brokerSession && brokerApiKey) {
+      angelOne.restoreSession(brokerSession, brokerIsDemo, brokerApiKey);
+    }
+  }, [brokerSession, brokerIsDemo, brokerApiKey]);
 
   const tabs = [
     { id: '/home',       icon: Home,          label: 'Home'      },

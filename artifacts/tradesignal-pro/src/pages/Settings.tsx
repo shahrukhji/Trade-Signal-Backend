@@ -106,33 +106,23 @@ export function Settings() {
     return () => clearInterval(t);
   }, []);
 
-  // Fetch wallet via backend — never uses frontend mock fallback
+  // Fetch wallet directly from browser → Angel One (uses real client IP, not server IP)
   const fetchWallet = useCallback(async () => {
     if (!isConnected) return;
     setWalletLoading(true);
     setWalletError(null);
     try {
-      const res = await fetch('/api/portfolio/summary');
-      const data = await res.json();
-      if (data.balance) {
-        setWallet({
-          availableCash:       data.balance.availableCash,
-          usedMargin:          data.balance.usedMargin,
-          totalMargin:         data.balance.totalNet,
-          availableMargin:     data.balance.availableMargin,
-          collateral:          data.balance.collateral,
-          totalPortfolioValue: data.balance.totalPortfolioValue,
-          todayPnL:            data.balance.todayPnL,
-          unrealizedPnL:       data.balance.unrealizedPnL,
-          utilizedAmount:      data.balance.usedMargin,
-          withdrawableBalance: data.balance.availableCash,
-        });
+      const bal = await angelOne.getWalletBalance();
+      if (bal) {
+        setWallet(bal);
       } else {
         setWallet(null);
-        setWalletError(data.balanceError || 'Balance data unavailable from Angel One');
+        setWalletError('getRMS returned no data. Enable Funds/RMS permission at smartapi.angelone.in');
       }
-    } catch (_) {
-      setWalletError('Could not reach balance API');
+    } catch (err: unknown) {
+      setWallet(null);
+      const msg = err instanceof Error ? err.message : 'Balance fetch failed';
+      setWalletError(msg);
     }
     setWalletLoading(false);
   }, [isConnected]);

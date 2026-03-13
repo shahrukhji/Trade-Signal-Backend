@@ -478,29 +478,25 @@ class AngelOneService {
   // WALLET / FUND BALANCE
   // ═══════════════════════════════════════
 
-  async getWalletBalance(): Promise<WalletBalance> {
-    if (!this.session || this.isDemo) return this.getMockWalletBalance();
+  async getWalletBalance(): Promise<WalletBalance | null> {
+    if (!this.session || this.isDemo) return null;
 
-    try {
-      const response = await this.apiCall('GET', '/rest/secure/angelbroking/user/v1/getRMS');
+    const response = await this.apiCall('GET', '/rest/secure/angelbroking/user/v1/getRMS');
 
-      if (response) {
-        return {
-          availableCash: parseFloat(response.availablecash) || 0,
-          usedMargin: parseFloat(response.utiliseddebits) || 0,
-          totalMargin: parseFloat(response.net) || 0,
-          availableMargin: parseFloat(response.availableintradaypayin) || 0,
-          collateral: parseFloat(response.collateral) || 0,
-          totalPortfolioValue: parseFloat(response.net) || 0,
-          todayPnL: parseFloat(response.m2mrealized) || 0,
-          unrealizedPnL: parseFloat(response.m2munrealized) || 0,
-          utilizedAmount: parseFloat(response.utiliseddebits) || 0,
-          withdrawableBalance: parseFloat(response.availablecash) || 0,
-        };
-      }
-    } catch (_) {}
+    if (!response) return null;
 
-    return this.getMockWalletBalance();
+    return {
+      availableCash: parseFloat(response.availablecash) || 0,
+      usedMargin: parseFloat(response.utiliseddebits) || 0,
+      totalMargin: parseFloat(response.net) || 0,
+      availableMargin: parseFloat(response.availableintradaypayin) || 0,
+      collateral: parseFloat(response.collateral) || 0,
+      totalPortfolioValue: parseFloat(response.net) || 0,
+      todayPnL: parseFloat(response.m2mrealized) || 0,
+      unrealizedPnL: parseFloat(response.m2munrealized) || 0,
+      utilizedAmount: parseFloat(response.utiliseddebits) || 0,
+      withdrawableBalance: parseFloat(response.availablecash) || 0,
+    };
   }
 
   // ═══════════════════════════════════════
