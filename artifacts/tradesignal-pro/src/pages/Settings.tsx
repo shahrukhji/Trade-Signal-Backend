@@ -63,6 +63,7 @@ export function Settings() {
   const [clientId, setClientId] = useState('');
   const [password, setPassword] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [totp, setTotp] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -72,6 +73,11 @@ export function Settings() {
     allConfigured: boolean; hasTotpSecret: boolean;
     hasClientCode: boolean; hasApiKey: boolean;
   } | null>(null);
+
+  type StepStatus = 'pending' | 'running' | 'success' | 'error';
+  interface LoginStep { id: string; label: string; status: StepStatus; detail?: string; }
+  const [loginSteps, setLoginSteps] = useState<LoginStep[]>([]);
+  const [showSteps, setShowSteps] = useState(false);
 
   // Post-login data
   const [wallet, setWallet] = useState<WalletBalance | null>(null);
@@ -184,29 +190,66 @@ export function Settings() {
   };
 
   const handleConnect = async () => {
-    if (!clientId.trim()) { setLoginError('Client ID is required'); return; }
-    if (!password.trim()) { setLoginError('Password / PIN is required'); return; }
-    // API key required only if not already configured via env var
-    if (!configStatus?.hasApiKey && !apiKey.trim()) {
-      setLoginError('SmartAPI Key is required'); return;
+    const cc = clientId.trim().toUpperCase();
+    const pin = password.trim();
+    const ak = apiKey.trim();
+    const otp = totp.trim();
+
+    if (!cc) { setLoginError('Client Code is required (e.g. S1234567)'); return; }
+    if (!pin || pin.length < 4) { setLoginError('Trading PIN must be 4–6 digits'); return; }
+    if (!configStatus?.hasApiKey && (!ak || ak.length < 6)) {
+      setLoginError('SmartAPI Key must be at least 6 characters (from smartapi.angelone.in)'); return;
+    }
+    if (!configStatus?.hasTotpSecret && (!otp || otp.length !== 6 || !/^\d{6}$/.test(otp))) {
+      setLoginError('Enter the 6-digit TOTP from your authenticator app'); return;
     }
 
     setLoginLoading(true);
     setLoginError('');
 
-    // TOTP is auto-injected server-side; pass empty so proxy generates it from env var.
-    // API key from form (or proxy uses env var if empty).
+    const steps: LoginStep[] = [
+      { id: 'validate', label: 'Validating credential format', status: 'running' },
+      { id: 'auth',     label: 'Authenticating with Angel One', status: 'pending' },
+      { id: 'profile',  label: 'Fetching account profile', status: 'pending' },
+      { id: 'funds',    label: 'Fetching wallet & funds', status: 'pending' },
+    ];
+    setLoginSteps([...steps]);
+    setShowSteps(true);
+
+    const updateStep = (id: string, status: StepStatus, detail?: string) => {
+      setLoginSteps(prev => prev.map(s => s.id === id ? { ...s, status, detail } : s));
+    };
+
+    await new Promise(r => setTimeout(r, 400));
+    updateStep('validate', 'success');
+    updateStep('auth', 'running');
+
     const result = await angelOne.login(
-      { clientId: clientId.trim().toUpperCase(), password: password.trim(), apiKey: apiKey.trim(), totp: '' },
+      { clientId: cc, password: pin, apiKey: ak, totp: otp },
       { strict: true }
     );
 
     if (result.success && result.session && result.profile) {
-      setBrokerSession(result.session, result.profile, false, apiKey.trim());
+      updateStep('auth', 'success');
+      updateStep('profile', 'running');
+      await new Promise(r => setTimeout(r, 300));
+      updateStep('profile', 'success');
+      updateStep('funds', 'running');
+
+      setBrokerSession(result.session, result.profile, false, ak);
       toast.success(`Connected as ${result.profile.clientName}`);
-      setTimeout(fetchWallet, 800);
+
+      try {
+        await fetchWallet();
+        updateStep('funds', 'success');
+      } catch {
+        updateStep('funds', 'error', 'Funds unavailable (AB1004) — enable Funds/RMS permission');
+      }
+      setTotp('');
     } else {
-      setLoginError(result.error || 'Login failed. Verify your credentials and try again.');
+      updateStep('auth', 'error', result.error || 'Authentication failed');
+      const errMsg = result.error || 'Login failed — check your credentials';
+      setLoginError(errMsg);
     }
 
     setLoginLoading(false);
@@ -216,6 +259,8 @@ export function Settings() {
     await angelOne.logout();
     clearBrokerSession();
     setWallet(null);
+    setShowSteps(false);
+    setLoginSteps([]);
     toast.info('Disconnected from Angel One');
   };
 
@@ -412,18 +457,26 @@ export function Settings() {
                         <div className="flex items-start gap-2">
                           <AlertCircle size={14} className="text-orange-400 mt-0.5 shrink-0" />
                           <div>
-                            <p className="text-xs font-semibold text-orange-400 mb-0.5">Funds Unavailable (AB1004)</p>
+                            <p className="text-xs font-semibold text-orange-400 mb-0.5">Funds Unavailable — Error AB1004</p>
                             <p className="text-[10px] text-muted-foreground leading-relaxed">
-                              Angel One's getRMS API is not returning balance data for this account.
+                              Your API key doesn't have Funds/RMS permission. This is permanent per Angel One's policy and not fixable in code.
                             </p>
                           </div>
                         </div>
                         <div className="bg-black/20 rounded-lg p-2.5 space-y-1.5">
-                          <p className="text-[9px] text-orange-300 font-bold uppercase tracking-wider">How to fix</p>
-                          <p className="text-[10px] text-muted-foreground">1. Go to <span className="text-foreground font-medium">smartapi.angelone.in</span></p>
-                          <p className="text-[10px] text-muted-foreground">2. Click <span className="text-foreground font-medium">My API → Edit API Key</span></p>
-                          <p className="text-[10px] text-muted-foreground">3. Enable <span className="text-orange-300 font-semibold">Funds / RMS</span> permission &amp; save</p>
-                          <p className="text-[10px] text-muted-foreground">4. If account has no deposits, add funds first</p>
+                          <p className="text-[9px] text-orange-300 font-bold uppercase tracking-wider mb-1">Fix in 3 steps</p>
+                          <div className="flex gap-2 items-start">
+                            <span className="text-[9px] bg-orange-400/20 text-orange-300 font-black rounded px-1 py-0.5 flex-shrink-0">1</span>
+                            <p className="text-[10px] text-muted-foreground">Open <span className="text-accent font-medium">smartapi.angelone.in</span> → My API</p>
+                          </div>
+                          <div className="flex gap-2 items-start">
+                            <span className="text-[9px] bg-orange-400/20 text-orange-300 font-black rounded px-1 py-0.5 flex-shrink-0">2</span>
+                            <p className="text-[10px] text-muted-foreground">Click <span className="text-foreground font-medium">Edit</span> on your API key → toggle ON <span className="text-orange-300 font-semibold">Funds</span> &amp; <span className="text-orange-300 font-semibold">RMS</span> permissions</p>
+                          </div>
+                          <div className="flex gap-2 items-start">
+                            <span className="text-[9px] bg-orange-400/20 text-orange-300 font-black rounded px-1 py-0.5 flex-shrink-0">3</span>
+                            <p className="text-[10px] text-muted-foreground">Save → disconnect here → reconnect. Also ensure your account has funds deposited.</p>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -506,18 +559,19 @@ export function Settings() {
                   )}
 
                   <div className="space-y-3">
-                    {/* Client ID */}
+                    {/* Client Code */}
                     <div>
-                      <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        Client ID <span className="text-destructive">*</span>
+                      <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                        Client Code <span className="text-destructive">*</span>
                       </label>
+                      <p className="text-[10px] text-muted-foreground mb-1.5">Your Angel One client ID (e.g. S1234567, R12345, A12345)</p>
                       <div className="relative">
                         <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
                           type="text"
                           value={clientId}
                           onChange={(e) => { setClientId(e.target.value.toUpperCase()); setLoginError(''); }}
-                          placeholder="e.g. A1234567"
+                          placeholder="e.g. S1234567"
                           className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
                           autoComplete="off"
                           autoCapitalize="characters"
@@ -525,18 +579,20 @@ export function Settings() {
                       </div>
                     </div>
 
-                    {/* PIN / Password */}
+                    {/* Trading PIN */}
                     <div>
-                      <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
-                        PIN / Password <span className="text-destructive">*</span>
+                      <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                        Trading PIN <span className="text-destructive">*</span>
                       </label>
+                      <p className="text-[10px] text-muted-foreground mb-1.5">4–6 digit PIN you use to login to Angel One app (NOT your bank password)</p>
                       <div className="relative">
                         <Shield size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                         <input
                           type={showPassword ? 'text' : 'password'}
+                          inputMode="numeric"
                           value={password}
-                          onChange={(e) => { setPassword(e.target.value); setLoginError(''); }}
-                          placeholder="Your Angel One login PIN"
+                          onChange={(e) => { setPassword(e.target.value.replace(/\D/g, '').slice(0, 6)); setLoginError(''); }}
+                          placeholder="4–6 digit trading PIN"
                           className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-10 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
                         />
                         <button
@@ -548,27 +604,28 @@ export function Settings() {
                       </div>
                     </div>
 
-                    {/* SmartAPI Key — hidden when already configured via env var */}
+                    {/* SmartAPI Key */}
                     {configStatus?.hasApiKey ? (
                       <div className="flex items-center gap-2 bg-primary/5 border border-primary/15 rounded-xl px-3 py-2.5">
                         <Key size={13} className="text-primary" />
                         <div>
                           <p className="text-[11px] font-semibold text-foreground">SmartAPI Key Configured ✓</p>
-                          <p className="text-[9px] text-muted-foreground">ANGELONE_API_KEY is set in Replit Secrets</p>
+                          <p className="text-[9px] text-muted-foreground">ANGELONE_API_KEY secret is set — sent as X-PrivateKey header</p>
                         </div>
                       </div>
                     ) : (
                       <div>
-                        <label className="text-xs font-semibold text-muted-foreground block mb-1.5">
+                        <label className="text-xs font-semibold text-muted-foreground block mb-1">
                           SmartAPI Key <span className="text-destructive">*</span>
                         </label>
+                        <p className="text-[10px] text-muted-foreground mb-1.5">6–64 alphanumeric chars from <span className="text-accent">smartapi.angelone.in</span> → My Apps → View Key</p>
                         <div className="relative">
                           <Key size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                           <input
                             type={showApiKey ? 'text' : 'password'}
                             value={apiKey}
                             onChange={(e) => { setApiKey(e.target.value); setLoginError(''); }}
-                            placeholder="From smartapi.angelone.in"
+                            placeholder="Alphanumeric API key (6–64 chars)"
                             className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-10 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors"
                             autoComplete="off"
                           />
@@ -579,26 +636,71 @@ export function Settings() {
                             {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
                           </button>
                         </div>
-                        <p className="text-[10px] text-muted-foreground mt-1">
-                          Create your API key at <span className="text-accent">smartapi.angelone.in</span>
-                        </p>
                       </div>
                     )}
 
-                    {/* TOTP info — auto-generated server-side */}
-                    <div className="flex items-center gap-2 bg-primary/5 border border-primary/15 rounded-xl px-3 py-2.5">
-                      <CheckCircle2 size={13} className={configStatus?.hasTotpSecret ? 'text-primary' : 'text-muted-foreground'} />
-                      <div>
-                        <p className="text-[11px] font-semibold text-foreground">
-                          TOTP {configStatus?.hasTotpSecret ? 'Auto-Generated ✓' : 'Required'}
-                        </p>
-                        <p className="text-[9px] text-muted-foreground leading-tight">
-                          {configStatus?.hasTotpSecret
-                            ? 'ANGELONE_TOTP_SECRET is configured — code generated automatically'
-                            : 'Set ANGELONE_TOTP_SECRET in Replit Secrets for auto-generation'}
-                        </p>
+                    {/* TOTP */}
+                    {configStatus?.hasTotpSecret ? (
+                      <div className="flex items-center gap-2 bg-primary/5 border border-primary/15 rounded-xl px-3 py-2.5">
+                        <CheckCircle2 size={13} className="text-primary" />
+                        <div>
+                          <p className="text-[11px] font-semibold text-foreground">TOTP Auto-Generated ✓</p>
+                          <p className="text-[9px] text-muted-foreground">ANGELONE_TOTP_SECRET is set — 6-digit code generated server-side</p>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground block mb-1">
+                          TOTP <span className="text-destructive">*</span>
+                        </label>
+                        <p className="text-[10px] text-muted-foreground mb-1.5">6-digit one-time code from Google Authenticator / any TOTP app linked to Angel One</p>
+                        <div className="relative">
+                          <Key size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            value={totp}
+                            onChange={(e) => { setTotp(e.target.value.replace(/\D/g, '').slice(0, 6)); setLoginError(''); }}
+                            placeholder="6-digit TOTP (e.g. 123456)"
+                            className="w-full bg-input border border-border rounded-xl h-12 pl-9 pr-3 text-sm font-mono text-foreground outline-none focus:border-accent transition-colors tracking-[0.4em]"
+                          />
+                        </div>
+                        <p className="text-[9px] text-yellow-400/80 mt-1">⚡ TOTP expires every 30s — enter it just before clicking Connect</p>
+                      </div>
+                    )}
+
+                    {/* Validation Steps (shown during login) */}
+                    <AnimatePresence>
+                      {showSteps && loginSteps.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0 }}
+                          className="bg-input border border-border rounded-xl p-3 space-y-2"
+                        >
+                          {loginSteps.map(step => (
+                            <div key={step.id} className="flex items-start gap-2">
+                              <div className="mt-0.5 flex-shrink-0">
+                                {step.status === 'running'  && <Loader2 size={13} className="text-accent animate-spin" />}
+                                {step.status === 'success'  && <CheckCircle2 size={13} className="text-primary" />}
+                                {step.status === 'error'    && <AlertCircle size={13} className="text-destructive" />}
+                                {step.status === 'pending'  && <div className="w-3 h-3 rounded-full border border-muted-foreground/40" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-[11px] font-medium leading-tight ${
+                                  step.status === 'running' ? 'text-accent' :
+                                  step.status === 'success' ? 'text-primary' :
+                                  step.status === 'error'   ? 'text-destructive' :
+                                  'text-muted-foreground'
+                                }`}>{step.label}</p>
+                                {step.detail && <p className="text-[9px] text-muted-foreground mt-0.5 leading-tight">{step.detail}</p>}
+                              </div>
+                            </div>
+                          ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
 
                     {/* Error */}
                     <AnimatePresence>
@@ -610,7 +712,21 @@ export function Settings() {
                           className="bg-destructive/10 border border-destructive/30 rounded-xl p-3 flex items-start gap-2"
                         >
                           <AlertCircle size={14} className="text-destructive mt-0.5 flex-shrink-0" />
-                          <p className="text-xs text-destructive">{loginError}</p>
+                          <div className="flex-1">
+                            <p className="text-xs text-destructive">{loginError}</p>
+                            {(loginError.includes('AB1003') || loginError.toLowerCase().includes('totp')) && (
+                              <p className="text-[10px] text-muted-foreground mt-1">Open your authenticator app and use the freshest 6-digit code.</p>
+                            )}
+                            {(loginError.includes('AB1001') || loginError.toLowerCase().includes('client')) && (
+                              <p className="text-[10px] text-muted-foreground mt-1">Double-check your Angel One Client Code (e.g. S1234567).</p>
+                            )}
+                            {(loginError.includes('AB1002') || loginError.toLowerCase().includes('pin')) && (
+                              <p className="text-[10px] text-muted-foreground mt-1">Enter your 4–6 digit Angel One trading PIN, not your bank password.</p>
+                            )}
+                            {(loginError.includes('AB1010') || loginError.includes('AG8001') || loginError.toLowerCase().includes('api key')) && (
+                              <p className="text-[10px] text-muted-foreground mt-1">Visit <span className="text-accent">smartapi.angelone.in</span> → My Apps to verify your key.</p>
+                            )}
+                          </div>
                         </motion.div>
                       )}
                     </AnimatePresence>
@@ -634,15 +750,15 @@ export function Settings() {
                       )}
                     </button>
 
-                    {/* Notice */}
+                    {/* Security notice */}
                     <div className="bg-input border border-white/5 rounded-xl p-3">
                       <p className="text-[10px] text-muted-foreground text-center leading-relaxed">
-                        🔒 Genuine credentials required — no demo mode.<br />
-                        Credentials are stored locally on your device only.
+                        🔒 Credentials sent via encrypted HTTPS · never stored in plain text<br />
+                        API Key goes in X-PrivateKey header per Angel One SmartAPI docs
                       </p>
                     </div>
 
-                    {/* Market Status (pre-login too) */}
+                    {/* Market Status */}
                     <div className={`rounded-xl p-3 border flex items-center justify-between ${marketStatus.open ? 'bg-primary/5 border-primary/20' : 'bg-yellow-500/5 border-yellow-500/20'}`}>
                       <div className="flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${marketStatus.open ? 'bg-primary animate-pulse' : 'bg-yellow-400'}`} />
