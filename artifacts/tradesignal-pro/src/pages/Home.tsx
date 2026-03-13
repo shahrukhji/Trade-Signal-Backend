@@ -1,67 +1,88 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'wouter';
 import { Bell, TrendingUp, TrendingDown, Target, BrainCircuit, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 
+const API = import.meta.env.BASE_URL.replace(/\/$/, '');
+
 interface IndexQuote {
-  name: string;
-  token: string;
-  exchange: string;
-  ltp: number;
-  change: number;
-  percentChange: number;
+  name: string; token: string; exchange: string;
+  ltp: number; change: number; percentChange: number;
+}
+interface HotSignal {
+  symbol: string; signal: string; ltp: number; score: number; rsi?: number;
+}
+interface Mover {
+  symbol: string; name: string; token: string;
+  ltp: number; change: number; percentChange: number;
 }
 
-interface HotSignal {
-  symbol: string;
-  signal: string;
-  ltp: number;
-  score: number;
-  rsi?: number;
-}
+type CapFilter = 'large' | 'mid' | 'small';
 
 function isMarketOpen(): boolean {
   const now = new Date();
   const day = now.getDay();
-  const h = now.getHours(), m = now.getMinutes();
-  const total = h * 60 + m;
+  const total = now.getHours() * 60 + now.getMinutes();
   return day >= 1 && day <= 5 && total >= 9 * 60 + 15 && total <= 15 * 60 + 30;
 }
+function fmt(n: number) { return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n); }
+function pct(n: number) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
 
-function fmt(n: number): string {
-  return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n);
-}
-
-// ─── Indices strip ─────────────────────────────────────────────────────────────
+// ─── Indices ──────────────────────────────────────────────────────────────────
 function useIndices() {
   const [indices, setIndices] = useState<IndexQuote[]>([]);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState<boolean | null>(null);
 
-  const fetch_ = async () => {
+  const fetch_ = useCallback(async () => {
     try {
-      const res = await fetch('/api/market/indices');
+      const res = await fetch(`${API}/api/market/indices`);
       const json = await res.json();
       if (json.success && Array.isArray(json.data) && json.data.length > 0) {
         setIndices(json.data.filter((d: IndexQuote) => d.ltp > 0));
         setConnected(true);
-      } else {
-        setConnected(false);
-      }
-    } catch {
-      setConnected(false);
-    } finally {
-      setLoading(false);
-    }
-  };
+      } else { setConnected(false); }
+    } catch { setConnected(false); }
+    finally { setLoading(false); }
+  }, []);
 
   useEffect(() => {
     fetch_();
-    const id = setInterval(fetch_, 60_000); // refresh every 60s
+    const id = setInterval(fetch_, 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [fetch_]);
 
   return { indices, loading, connected, refresh: fetch_ };
+}
+
+// ─── Movers ───────────────────────────────────────────────────────────────────
+function useMovers(cap: CapFilter) {
+  const [gainers, setGainers] = useState<Mover[]>([]);
+  const [losers, setLosers] = useState<Mover[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(0);
+
+  const fetch_ = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API}/api/market/movers?cap=${cap}&limit=5`);
+      const json = await res.json();
+      if (json.success) {
+        setGainers(json.gainers ?? []);
+        setLosers(json.losers ?? []);
+        setTotal(json.total ?? 0);
+      }
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, [cap]);
+
+  useEffect(() => {
+    fetch_();
+    const id = setInterval(fetch_, 3 * 60_000); // refresh every 3 min
+    return () => clearInterval(id);
+  }, [fetch_]);
+
+  return { gainers, losers, loading, total, refresh: fetch_ };
 }
 
 // ─── Hot signals ──────────────────────────────────────────────────────────────
@@ -69,38 +90,41 @@ function useHotSignals() {
   const [signals, setSignals] = useState<HotSignal[]>([]);
 
   useEffect(() => {
-    fetch('/api/signals/?limit=6&minConfidence=55')
-      .then(r => r.json())
-      .then(json => {
-        if (json.success && Array.isArray(json.data)) {
-          setSignals(json.data.slice(0, 5).map((d: any) => ({
-            symbol: d.symbol,
-            signal: d.signal,
-            ltp: d.ltp || 0,
-            score: d.score || 0,
-            rsi: d.rsi,
-          })));
-        }
-      })
-      .catch(() => {});
-
-    // Refresh every 5 minutes
-    const id = setInterval(() => {
-      fetch('/api/signals/?limit=6&minConfidence=55')
+    const load = () =>
+      fetch(`${API}/api/signals/?limit=6&minConfidence=55`)
         .then(r => r.json())
         .then(json => {
           if (json.success && Array.isArray(json.data)) {
-            setSignals(json.data.slice(0, 5).map((d: any) => ({
-              symbol: d.symbol, signal: d.signal, ltp: d.ltp || 0,
-              score: d.score || 0, rsi: d.rsi,
+            setSignals(json.data.slice(0, 5).map((d: HotSignal & { rsi?: number }) => ({
+              symbol: d.symbol, signal: d.signal, ltp: d.ltp || 0, score: d.score || 0, rsi: d.rsi,
             })));
           }
         }).catch(() => {});
-    }, 5 * 60_000);
+    load();
+    const id = setInterval(load, 5 * 60_000);
     return () => clearInterval(id);
   }, []);
 
   return signals;
+}
+
+// ─── MoverCard ────────────────────────────────────────────────────────────────
+function MoverCard({ m, type }: { m: Mover; type: 'gainer' | 'loser' }) {
+  const isUp = type === 'gainer';
+  return (
+    <div className={`snap-start shrink-0 w-[130px] rounded-xl border p-3 ${isUp ? 'bg-green-400/5 border-green-400/20' : 'bg-red-400/5 border-red-400/20'}`}>
+      <p className="text-[10px] text-muted-foreground truncate mb-0.5">{m.name}</p>
+      <p className="text-xs font-bold text-foreground font-mono truncate">{m.symbol}</p>
+      <p className="text-sm font-bold font-mono mt-1">₹{fmt(m.ltp)}</p>
+      <div className={`flex items-center gap-1 mt-1 ${isUp ? 'text-green-400' : 'text-red-400'}`}>
+        {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+        <span className="text-[11px] font-bold">{pct(m.percentChange)}</span>
+      </div>
+      <p className={`text-[9px] mt-0.5 ${isUp ? 'text-green-400/70' : 'text-red-400/70'}`}>
+        {m.change >= 0 ? '+' : ''}₹{fmt(m.change)}
+      </p>
+    </div>
+  );
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -112,11 +136,12 @@ export function Home() {
     return 'Evening';
   });
   const [now, setNow] = useState(new Date());
+  const [cap, setCap] = useState<CapFilter>('large');
   const { indices, loading: indicesLoading, connected, refresh: refreshIndices } = useIndices();
+  const { gainers, losers, loading: moversLoading, total, refresh: refreshMovers } = useMovers(cap);
   const hotSignals = useHotSignals();
   const marketOpen = isMarketOpen();
 
-  // Update clock every minute
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);
@@ -161,10 +186,8 @@ export function Home() {
           <RefreshCw size={13} className={indicesLoading ? 'animate-spin' : ''} />
         </button>
       </div>
-
       <div className="flex overflow-x-auto no-scrollbar gap-3 pb-4 mb-6 -mx-4 px-4 snap-x">
         {indicesLoading && indices.length === 0 ? (
-          // Skeleton
           [1, 2, 3, 4].map(i => (
             <div key={i} className="snap-start shrink-0 w-[140px] glass-panel p-3 rounded-xl border border-border animate-pulse">
               <div className="h-3 w-20 bg-border rounded mb-2" />
@@ -184,17 +207,95 @@ export function Home() {
             </div>
           ))
         ) : (
-          // Offline fallback — show placeholder cards
-          [
-            { name: 'NIFTY 50', note: 'Connecting...' },
-            { name: 'BANK NIFTY', note: 'Connecting...' },
-            { name: 'SENSEX', note: 'Connecting...' },
-          ].map(idx => (
+          [{ name: 'NIFTY 50' }, { name: 'BANK NIFTY' }, { name: 'SENSEX' }].map(idx => (
             <div key={idx.name} className="snap-start shrink-0 w-[148px] glass-panel p-3 rounded-xl border border-border opacity-50">
               <p className="text-[10px] text-muted-foreground mb-1">{idx.name}</p>
-              <p className="text-xs text-muted-foreground font-mono">{idx.note}</p>
+              <p className="text-xs text-muted-foreground font-mono">Connecting...</p>
             </div>
           ))
+        )}
+      </div>
+
+      {/* ─── Top Gainers & Top Losers ──────────────────────────────────────── */}
+      <div className="mb-1">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Market Movers</h3>
+          <div className="flex items-center gap-2">
+            {total > 0 && <span className="text-[9px] text-muted-foreground">{total} stocks</span>}
+            <button onClick={refreshMovers} className="text-muted-foreground hover:text-foreground transition-colors">
+              <RefreshCw size={12} className={moversLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        </div>
+
+        {/* Market Cap filter */}
+        <div className="flex gap-2 mb-4">
+          {([
+            { key: 'large', label: 'Large Cap', sub: 'NIFTY 50' },
+            { key: 'mid',   label: 'Mid Cap',   sub: 'Midcap 100' },
+            { key: 'small', label: 'Small Cap', sub: 'Smallcap 250' },
+          ] as { key: CapFilter; label: string; sub: string }[]).map(({ key, label, sub }) => (
+            <button
+              key={key}
+              onClick={() => setCap(key)}
+              className={`flex-1 rounded-xl border py-2 px-1 text-center transition-all ${
+                cap === key
+                  ? 'border-accent/50 bg-accent/10 text-accent'
+                  : 'border-white/10 bg-white/5 text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <div className="text-[10px] font-bold">{label}</div>
+              <div className="text-[8px] opacity-60">{sub}</div>
+            </button>
+          ))}
+        </div>
+
+        {moversLoading && gainers.length === 0 ? (
+          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 mb-4">
+            {[1,2,3,4,5].map(i => (
+              <div key={i} className="snap-start shrink-0 w-[130px] rounded-xl border border-border p-3 animate-pulse bg-white/5">
+                <div className="h-3 w-20 bg-border/50 rounded mb-2" />
+                <div className="h-4 w-16 bg-border/50 rounded mb-1" />
+                <div className="h-4 w-14 bg-border/50 rounded" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <>
+            {/* Top Gainers */}
+            <div className="mb-4">
+              <div className="flex items-center gap-1.5 mb-2">
+                <TrendingUp size={13} className="text-green-400" />
+                <span className="text-xs font-bold text-green-400 uppercase tracking-wider">Top Gainers</span>
+              </div>
+              {gainers.length > 0 ? (
+                <div className="flex overflow-x-auto no-scrollbar gap-2 -mx-4 px-4 pb-2 snap-x">
+                  {gainers.map(m => <MoverCard key={m.symbol} m={m} type="gainer" />)}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-white/10 rounded-xl">
+                  No gainer data available for {cap} cap · Market may be closed
+                </div>
+              )}
+            </div>
+
+            {/* Top Losers */}
+            <div className="mb-6">
+              <div className="flex items-center gap-1.5 mb-2">
+                <TrendingDown size={13} className="text-red-400" />
+                <span className="text-xs font-bold text-red-400 uppercase tracking-wider">Top Losers</span>
+              </div>
+              {losers.length > 0 ? (
+                <div className="flex overflow-x-auto no-scrollbar gap-2 -mx-4 px-4 pb-2 snap-x">
+                  {losers.map(m => <MoverCard key={m.symbol} m={m} type="loser" />)}
+                </div>
+              ) : (
+                <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-white/10 rounded-xl">
+                  No loser data available for {cap} cap · Market may be closed
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 
@@ -209,9 +310,7 @@ export function Home() {
             <p className="text-xs text-muted-foreground">Scan NIFTY50 for live setups</p>
           </div>
         </div>
-        <div className="bg-accent text-background text-xs font-bold px-3 py-1.5 rounded-full">
-          RUN SCAN
-        </div>
+        <div className="bg-accent text-background text-xs font-bold px-3 py-1.5 rounded-full">RUN SCAN</div>
       </Link>
 
       {/* Hot Signals */}
@@ -259,9 +358,7 @@ export function Home() {
                   }`}>
                     {isBuy ? '🟢' : isSell ? '🔴' : '⚪'} {sig.signal.replace('_', ' ')}
                   </p>
-                  {sig.ltp > 0 && (
-                    <p className="text-sm font-mono font-medium">₹{fmt(sig.ltp)}</p>
-                  )}
+                  {sig.ltp > 0 && <p className="text-sm font-mono font-medium">₹{fmt(sig.ltp)}</p>}
                 </div>
               </motion.div>
             );
@@ -269,7 +366,7 @@ export function Home() {
         </div>
       )}
 
-      <p className="text-xs text-muted-foreground text-center mt-8 opacity-50">
+      <p className="text-xs text-muted-foreground text-center mt-8 mb-2 opacity-50">
         Live data from Angel One SmartAPI · Made with ❤️ by Shahrukh
       </p>
     </div>
