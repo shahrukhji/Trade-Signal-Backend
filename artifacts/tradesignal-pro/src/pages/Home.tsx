@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'wouter';
-import { Bell, TrendingUp, TrendingDown, Target, BrainCircuit, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { Bell, TrendingUp, TrendingDown, Target, BrainCircuit, RefreshCw, Wifi, WifiOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const API = import.meta.env.BASE_URL.replace(/\/$/, '');
@@ -27,6 +27,32 @@ function isMarketOpen(): boolean {
 }
 function fmt(n: number) { return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n); }
 function pct(n: number) { return (n >= 0 ? '+' : '') + n.toFixed(2) + '%'; }
+
+// ─── Scroll helpers ────────────────────────────────────────────────────────────
+function scrollBy(ref: React.RefObject<HTMLDivElement | null>, dir: 1 | -1) {
+  ref.current?.scrollBy({ left: dir * 150, behavior: 'smooth' });
+}
+
+function ScrollArrows({ scrollRef, className = '' }: { scrollRef: React.RefObject<HTMLDivElement | null>; className?: string }) {
+  return (
+    <div className={`flex items-center gap-1 ${className}`}>
+      <button
+        onClick={() => scrollBy(scrollRef, -1)}
+        className="w-6 h-6 flex items-center justify-center rounded-full bg-white/8 border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/15 active:scale-90 transition-all"
+        aria-label="Scroll left"
+      >
+        <ChevronLeft size={12} />
+      </button>
+      <button
+        onClick={() => scrollBy(scrollRef, 1)}
+        className="w-6 h-6 flex items-center justify-center rounded-full bg-white/8 border border-white/10 text-muted-foreground hover:text-foreground hover:bg-white/15 active:scale-90 transition-all"
+        aria-label="Scroll right"
+      >
+        <ChevronRight size={12} />
+      </button>
+    </div>
+  );
+}
 
 // ─── Indices ──────────────────────────────────────────────────────────────────
 function useIndices() {
@@ -78,7 +104,7 @@ function useMovers(cap: CapFilter) {
 
   useEffect(() => {
     fetch_();
-    const id = setInterval(fetch_, 3 * 60_000); // refresh every 3 min
+    const id = setInterval(fetch_, 3 * 60_000);
     return () => clearInterval(id);
   }, [fetch_]);
 
@@ -137,10 +163,16 @@ export function Home() {
   });
   const [now, setNow] = useState(new Date());
   const [cap, setCap] = useState<CapFilter>('large');
+
   const { indices, loading: indicesLoading, connected, refresh: refreshIndices } = useIndices();
   const { gainers, losers, loading: moversLoading, total, refresh: refreshMovers } = useMovers(cap);
   const hotSignals = useHotSignals();
   const marketOpen = isMarketOpen();
+
+  // Scroll refs for each rail
+  const indicesRef  = useRef<HTMLDivElement>(null);
+  const gainersRef  = useRef<HTMLDivElement>(null);
+  const losersRef   = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
@@ -179,14 +211,21 @@ export function Home() {
         </p>
       </div>
 
-      {/* Market Indices */}
+      {/* ─── Live Market Indices ─────────────────────────────────────────────── */}
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Live Market</h3>
-        <button onClick={refreshIndices} className="text-muted-foreground hover:text-foreground transition-colors">
-          <RefreshCw size={13} className={indicesLoading ? 'animate-spin' : ''} />
-        </button>
+        <div className="flex items-center gap-2">
+          <ScrollArrows scrollRef={indicesRef} />
+          <button onClick={refreshIndices} className="text-muted-foreground hover:text-foreground transition-colors ml-1">
+            <RefreshCw size={13} className={indicesLoading ? 'animate-spin' : ''} />
+          </button>
+        </div>
       </div>
-      <div className="flex overflow-x-auto no-scrollbar gap-3 pb-4 mb-6 -mx-4 px-4 snap-x">
+
+      <div
+        ref={indicesRef}
+        className="flex overflow-x-auto no-scrollbar gap-3 pb-4 mb-6 -mx-4 px-4 snap-x scroll-smooth"
+      >
         {indicesLoading && indices.length === 0 ? (
           [1, 2, 3, 4].map(i => (
             <div key={i} className="snap-start shrink-0 w-[140px] glass-panel p-3 rounded-xl border border-border animate-pulse">
@@ -216,7 +255,7 @@ export function Home() {
         )}
       </div>
 
-      {/* ─── Top Gainers & Top Losers ──────────────────────────────────────── */}
+      {/* ─── Market Movers ───────────────────────────────────────────────────── */}
       <div className="mb-1">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">Market Movers</h3>
@@ -252,7 +291,7 @@ export function Home() {
 
         {moversLoading && gainers.length === 0 ? (
           <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 mb-4">
-            {[1,2,3,4,5].map(i => (
+            {[1, 2, 3, 4, 5].map(i => (
               <div key={i} className="snap-start shrink-0 w-[130px] rounded-xl border border-border p-3 animate-pulse bg-white/5">
                 <div className="h-3 w-20 bg-border/50 rounded mb-2" />
                 <div className="h-4 w-16 bg-border/50 rounded mb-1" />
@@ -264,34 +303,46 @@ export function Home() {
           <>
             {/* Top Gainers */}
             <div className="mb-4">
-              <div className="flex items-center gap-1.5 mb-2">
-                <TrendingUp size={13} className="text-green-400" />
-                <span className="text-xs font-bold text-green-400 uppercase tracking-wider">Top Gainers</span>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <TrendingUp size={13} className="text-green-400" />
+                  <span className="text-xs font-bold text-green-400 uppercase tracking-wider">Top Gainers</span>
+                </div>
+                {gainers.length > 0 && <ScrollArrows scrollRef={gainersRef} />}
               </div>
               {gainers.length > 0 ? (
-                <div className="flex overflow-x-auto no-scrollbar gap-2 -mx-4 px-4 pb-2 snap-x">
+                <div
+                  ref={gainersRef}
+                  className="flex overflow-x-auto no-scrollbar gap-2 -mx-4 px-4 pb-2 snap-x scroll-smooth"
+                >
                   {gainers.map(m => <MoverCard key={m.symbol} m={m} type="gainer" />)}
                 </div>
               ) : (
                 <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-white/10 rounded-xl">
-                  No gainer data available for {cap} cap · Market may be closed
+                  No gainer data · Market may be closed
                 </div>
               )}
             </div>
 
             {/* Top Losers */}
             <div className="mb-6">
-              <div className="flex items-center gap-1.5 mb-2">
-                <TrendingDown size={13} className="text-red-400" />
-                <span className="text-xs font-bold text-red-400 uppercase tracking-wider">Top Losers</span>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <TrendingDown size={13} className="text-red-400" />
+                  <span className="text-xs font-bold text-red-400 uppercase tracking-wider">Top Losers</span>
+                </div>
+                {losers.length > 0 && <ScrollArrows scrollRef={losersRef} />}
               </div>
               {losers.length > 0 ? (
-                <div className="flex overflow-x-auto no-scrollbar gap-2 -mx-4 px-4 pb-2 snap-x">
+                <div
+                  ref={losersRef}
+                  className="flex overflow-x-auto no-scrollbar gap-2 -mx-4 px-4 pb-2 snap-x scroll-smooth"
+                >
                   {losers.map(m => <MoverCard key={m.symbol} m={m} type="loser" />)}
                 </div>
               ) : (
                 <div className="text-xs text-muted-foreground text-center py-4 border border-dashed border-white/10 rounded-xl">
-                  No loser data available for {cap} cap · Market may be closed
+                  No loser data · Market may be closed
                 </div>
               )}
             </div>
