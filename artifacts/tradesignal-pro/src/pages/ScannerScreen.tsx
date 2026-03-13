@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ScanLine, Download, TrendingUp, TrendingDown, Minus, Activity } from 'lucide-react';
+import { ScanLine, Download, TrendingUp, TrendingDown, Minus, Activity, CheckCircle, Loader2 } from 'lucide-react';
 import { SCREENER_FILTERS, applyScreenerFilter } from '@/engine/screener';
 import type { LiveSignal } from '@/engine/signalEngine';
 import { useLocation } from 'wouter';
@@ -8,7 +8,6 @@ import { useLocation } from 'wouter';
 const fmtINR = (n: number) =>
   `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n)}`;
 
-// ─── Map backend SignalResult → LiveSignal shape (for UI reuse) ───────────────
 function mapBackendSignal(r: any): LiveSignal {
   const isBuy = (r.signal as string).includes('BUY');
   const isSell = (r.signal as string).includes('SELL');
@@ -40,7 +39,7 @@ function mapBackendSignal(r: any): LiveSignal {
       riskRewardRatio: r.riskReward ?? 1,
       positionSizeForRisk: (cap: number) => Math.floor(cap / Math.max(1, Math.abs(price - (r.stopLoss ?? price * 0.98)))),
     },
-    reasons: (r.reasons ?? []).map((text: string, i: number) => ({
+    reasons: (r.reasons ?? []).map((text: string) => ({
       indicator: text.split(' ')[0] ?? 'IND',
       value: '',
       interpretation: text,
@@ -78,7 +77,6 @@ function mapBackendSignal(r: any): LiveSignal {
   };
 }
 
-// ─── UI sub-components ────────────────────────────────────────────────────────
 function SignalBadge({ sig }: { sig: string }) {
   const isBuy = sig.includes('BUY');
   const isSell = sig.includes('SELL');
@@ -150,6 +148,129 @@ function ResultCard({ signal, onClick }: { signal: LiveSignal; onClick: () => vo
   );
 }
 
+// ─── Live scanning progress panel ────────────────────────────────────────────
+function ScanProgressPanel({
+  progress, total, currentSymbol, liveResults, elapsed,
+}: {
+  progress: number;
+  total: number;
+  currentSymbol: string;
+  liveResults: LiveSignal[];
+  elapsed: number;
+}) {
+  const pct = total > 0 ? Math.round((progress / total) * 100) : 0;
+  const liveBuys = liveResults.filter(s => s.signal.includes('BUY'));
+  const liveSells = liveResults.filter(s => s.signal.includes('SELL'));
+  const liveNeutral = liveResults.filter(s => s.signal === 'NEUTRAL');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll live results to bottom as new ones arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [liveResults.length]);
+
+  return (
+    <div className="px-4 space-y-4">
+      {/* Big progress card */}
+      <div className="glass-panel border border-accent/30 rounded-2xl p-4">
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+            <span className="text-xs font-bold text-accent">LIVE SCANNING</span>
+          </div>
+          <span className="text-xs text-muted-foreground font-mono">{elapsed}s elapsed</span>
+        </div>
+
+        {/* Current stock badge */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center font-bold text-accent text-base animate-pulse flex-shrink-0">
+            {currentSymbol ? currentSymbol[0] : '?'}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[10px] text-muted-foreground">Currently analyzing</p>
+            <p className="text-sm font-bold text-foreground font-mono truncate">
+              {currentSymbol || 'Initializing...'}
+            </p>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="text-2xl font-black text-accent font-mono leading-none">{pct}%</p>
+            <p className="text-[10px] text-muted-foreground">{progress}/{total}</p>
+          </div>
+        </div>
+
+        {/* Wide progress bar */}
+        <div className="h-3 bg-input rounded-full overflow-hidden mb-3">
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: 'linear-gradient(90deg, #00C896, #00FF88)' }}
+            animate={{ width: `${pct}%` }}
+            transition={{ duration: 0.4, ease: 'easeOut' }}
+          />
+        </div>
+
+        {/* Live signal counters */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-primary/10 border border-primary/20 rounded-xl p-2 text-center">
+            <p className="text-lg font-black text-primary leading-none">{liveBuys.length}</p>
+            <p className="text-[9px] text-primary/70 mt-0.5 font-bold">BUY</p>
+          </div>
+          <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-2 text-center">
+            <p className="text-lg font-black text-destructive leading-none">{liveSells.length}</p>
+            <p className="text-[9px] text-destructive/70 mt-0.5 font-bold">SELL</p>
+          </div>
+          <div className="bg-input border border-border rounded-xl p-2 text-center">
+            <p className="text-lg font-black text-muted-foreground leading-none">{liveNeutral.length}</p>
+            <p className="text-[9px] text-muted-foreground/70 mt-0.5 font-bold">NEUTRAL</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Live results stream */}
+      {liveResults.length > 0 && (
+        <div>
+          <p className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-1.5">
+            <Activity size={11} className="text-accent" />
+            Signals found so far
+            <span className="ml-auto text-accent">{liveResults.filter(s => s.signal !== 'NEUTRAL').length} actionable</span>
+          </p>
+          <div ref={scrollRef} className="space-y-1.5 max-h-64 overflow-y-auto no-scrollbar">
+            <AnimatePresence initial={false}>
+              {liveResults.slice().reverse().map(s => (
+                <motion.div
+                  key={s.id}
+                  initial={{ opacity: 0, x: -12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-input/50 border border-border rounded-xl"
+                >
+                  <div className="w-6 h-6 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center font-bold text-accent text-[10px] flex-shrink-0">
+                    {s.symbol[0]}
+                  </div>
+                  <span className="font-mono text-xs font-bold text-foreground flex-1">{s.symbol}</span>
+                  <SignalBadge sig={s.signal} />
+                  {s.confidence > 0 && (
+                    <span className="text-[10px] text-muted-foreground font-mono">{s.confidence}%</span>
+                  )}
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        </div>
+      )}
+
+      {liveResults.length === 0 && (
+        <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
+          <Loader2 size={14} className="animate-spin" />
+          <span className="text-xs">Fetching candles from Angel One...</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export function ScannerScreen() {
   const [, navigate] = useLocation();
@@ -162,18 +283,26 @@ export function ScannerScreen() {
   const [currentSymbol, setCurrentSymbol] = useState('');
   const [scanned, setScanned] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  // Live results that stream in during scanning
+  const [liveResults, setLiveResults] = useState<LiveSignal[]>([]);
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const buys = filteredResults.filter(s => s.signal.includes('BUY'));
   const sells = filteredResults.filter(s => s.signal.includes('SELL'));
   const neutral = filteredResults.filter(s => s.signal === 'NEUTRAL');
 
-  // ─── Scan via backend SSE endpoint (real Angel One data) ─────────────────
   const scanAll = useCallback(async () => {
     setScanning(true);
     setProgress(0);
     setTotal(50);
     setScanError(null);
     setScanned(false);
+    setLiveResults([]);
+    setElapsed(0);
+
+    // Start elapsed timer
+    elapsedRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
 
     try {
       const res = await fetch('/api/signals/scanner/run', {
@@ -203,24 +332,31 @@ export function ScannerScreen() {
           try {
             const evt = JSON.parse(line.slice(6));
             if (evt.done && Array.isArray(evt.results)) {
-              // Final event — map backend results to LiveSignal[]
+              // Final event — replace with server-sorted/filtered results
               const mapped: LiveSignal[] = evt.results.map(mapBackendSignal);
               setAllResults(mapped);
               setFilteredResults(applyScreenerFilter(mapped, activeFilter));
               setScanned(true);
             } else {
-              // Progress event
+              // Progress event with optional individual result
               if (evt.scanned !== undefined) setProgress(Number(evt.scanned));
               if (evt.total !== undefined) setTotal(Number(evt.total));
               if (evt.currentStock) setCurrentSymbol(String(evt.currentStock).replace('-EQ', ''));
+              // Stream individual result into live panel
+              if (evt.result) {
+                const mapped = mapBackendSignal(evt.result);
+                setLiveResults(prev => [...prev, mapped]);
+              }
             }
-          } catch { /* skip malformed events */ }
+          } catch { /* skip malformed */ }
         }
       }
     } catch (err) {
       setScanError(err instanceof Error ? err.message : 'Scan failed. Check connection.');
     } finally {
       setScanning(false);
+      setCurrentSymbol('');
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
     }
   }, [activeFilter]);
 
@@ -248,16 +384,19 @@ export function ScannerScreen() {
           <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
             <ScanLine size={18} className="text-accent" /> Smart Scanner
           </h1>
-          {scanned && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Found: <span className="text-primary font-bold">{buys.length} Buy</span> ·{' '}
-              <span className="text-destructive font-bold">{sells.length} Sell</span> ·{' '}
-              <span className="text-muted-foreground">{neutral.length} Neutral</span>
+          {scanned && !scanning && (
+            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+              <CheckCircle size={10} className="text-primary" />
+              <span className="text-primary font-bold">{buys.length} Buy</span>
+              {' '}·{' '}
+              <span className="text-destructive font-bold">{sells.length} Sell</span>
+              {' '}·{' '}
+              <span>{neutral.length} Neutral</span>
               {' '}· Live Angel One data
             </p>
           )}
         </div>
-        {scanned && (
+        {scanned && !scanning && (
           <button onClick={exportCSV} className="p-2 rounded-xl bg-input border border-border text-muted-foreground" title="Copy CSV">
             <Download size={14} />
           </button>
@@ -297,7 +436,8 @@ export function ScannerScreen() {
           {scanning ? (
             <>
               <Activity size={16} className="animate-pulse" />
-              Scanning {progress}/{total} — {currentSymbol || '...'}
+              Scanning {progress}/{total}
+              {currentSymbol ? ` — ${currentSymbol}` : ''}
             </>
           ) : (
             <>
@@ -307,28 +447,6 @@ export function ScannerScreen() {
           )}
         </button>
 
-        <AnimatePresence>
-          {scanning && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              className="mt-2"
-            >
-              <div className="h-2 bg-input rounded-full overflow-hidden">
-                <motion.div
-                  className="h-full bg-accent rounded-full"
-                  animate={{ width: `${(progress / total) * 100}%` }}
-                  transition={{ duration: 0.3 }}
-                />
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-1 text-center">
-                Fetching live candles from Angel One SmartAPI...
-              </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {scanError && (
           <div className="mt-2 px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-xs text-destructive">
             {scanError}
@@ -336,71 +454,102 @@ export function ScannerScreen() {
         )}
       </div>
 
-      {/* Results */}
-      {scanned && !scanning && (
-        <div className="px-4 space-y-4">
-          {buys.length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-primary mb-2 flex items-center gap-1">
-                <TrendingUp size={12} /> BUY Signals ({buys.length})
-              </p>
-              <div className="space-y-2">
-                {buys.sort((a, b) => b.score - a.score).map(s => (
-                  <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
-                ))}
+      {/* Live progress panel (replaces results area while scanning) */}
+      <AnimatePresence mode="wait">
+        {scanning && (
+          <motion.div
+            key="scanning"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <ScanProgressPanel
+              progress={progress}
+              total={total}
+              currentSymbol={currentSymbol}
+              liveResults={liveResults}
+              elapsed={elapsed}
+            />
+          </motion.div>
+        )}
+
+        {/* Final results */}
+        {scanned && !scanning && (
+          <motion.div
+            key="results"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="px-4 space-y-4"
+          >
+            {buys.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-primary mb-2 flex items-center gap-1">
+                  <TrendingUp size={12} /> BUY Signals ({buys.length})
+                </p>
+                <div className="space-y-2">
+                  {buys.sort((a, b) => b.score - a.score).map(s => (
+                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {neutral.length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-1">
-                <Minus size={12} /> Neutral ({neutral.length})
-              </p>
-              <div className="space-y-2">
-                {neutral.slice(0, 5).map(s => (
-                  <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
-                ))}
-                {neutral.length > 5 && (
-                  <p className="text-xs text-muted-foreground text-center py-2">+{neutral.length - 5} more neutral...</p>
-                )}
+            {neutral.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-1">
+                  <Minus size={12} /> Neutral ({neutral.length})
+                </p>
+                <div className="space-y-2">
+                  {neutral.slice(0, 5).map(s => (
+                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
+                  ))}
+                  {neutral.length > 5 && (
+                    <p className="text-xs text-muted-foreground text-center py-2">+{neutral.length - 5} more neutral...</p>
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {sells.length > 0 && (
-            <div>
-              <p className="text-xs font-bold text-destructive mb-2 flex items-center gap-1">
-                <TrendingDown size={12} /> SELL Signals ({sells.length})
-              </p>
-              <div className="space-y-2">
-                {sells.sort((a, b) => a.score - b.score).map(s => (
-                  <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
-                ))}
+            {sells.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-destructive mb-2 flex items-center gap-1">
+                  <TrendingDown size={12} /> SELL Signals ({sells.length})
+                </p>
+                <div className="space-y-2">
+                  {sells.sort((a, b) => a.score - b.score).map(s => (
+                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {filteredResults.length === 0 && (
-            <div className="text-center py-12 text-muted-foreground">
-              <ScanLine size={32} className="mx-auto mb-2 opacity-30" />
-              <p className="text-sm">No stocks match this filter</p>
-              <p className="text-xs mt-1">Try "All" or another filter</p>
-            </div>
-          )}
-        </div>
-      )}
+            {filteredResults.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                <ScanLine size={32} className="mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No stocks match this filter</p>
+                <p className="text-xs mt-1">Try "All" or another filter</p>
+              </div>
+            )}
+          </motion.div>
+        )}
 
-      {!scanned && !scanning && (
-        <div className="text-center py-16 text-muted-foreground px-8">
-          <ScanLine size={40} className="mx-auto mb-3 opacity-20" />
-          <p className="text-sm font-medium">Scan NIFTY 50 with live Angel One data</p>
-          <p className="text-xs mt-2 leading-relaxed">
-            Fetches real 15-min candles · Runs 25+ indicators<br />
-            Filters BUY signals, breakouts, volume spikes & more
-          </p>
-        </div>
-      )}
+        {/* Empty state */}
+        {!scanned && !scanning && (
+          <motion.div
+            key="empty"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center py-16 text-muted-foreground px-8"
+          >
+            <ScanLine size={40} className="mx-auto mb-3 opacity-20" />
+            <p className="text-sm font-medium">Scan NIFTY 50 with live Angel One data</p>
+            <p className="text-xs mt-2 leading-relaxed">
+              Fetches real 15-min candles · Runs 25+ indicators<br />
+              Filters BUY signals, breakouts, volume spikes & more
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

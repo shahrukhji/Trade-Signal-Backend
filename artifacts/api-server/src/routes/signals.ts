@@ -133,14 +133,21 @@ router.post("/scanner/run", async (req, res) => {
       const batch = NIFTY50.slice(i, i + BATCH_SIZE);
       await Promise.all(
         batch.map(async (stock) => {
+          let result: ReturnType<typeof generateSignal> | null = null;
           try {
             const candles = await fetchCandles(stock.token, interval);
             if (candles.length >= 20) {
-              const signal = generateSignal(stock.symbol, candles);
-              results.push(signal);
+              result = generateSignal(stock.symbol, candles);
+              results.push(result);
             }
           } catch {}
-          res.write(`data: ${JSON.stringify({ scanned: results.length, total, currentStock: stock.symbol })}\n\n`);
+          // Emit progress + the individual result immediately (null if candles insufficient)
+          res.write(`data: ${JSON.stringify({
+            scanned: results.length,
+            total,
+            currentStock: stock.symbol,
+            result: result ?? null,
+          })}\n\n`);
         })
       );
     }
