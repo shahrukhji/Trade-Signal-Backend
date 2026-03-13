@@ -8,6 +8,17 @@ import { useLocation } from 'wouter';
 const fmtINR = (n: number) =>
   `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n)}`;
 
+// Mirror of backend NIFTY50 list — used for simulated progress display
+const NIFTY50_NAMES = [
+  'RELIANCE','TCS','HDFCBANK','INFY','ICICIBANK','HINDUNILVR','ITC','SBIN',
+  'BAJFINANCE','BHARTIARTL','KOTAKBANK','WIPRO','HCLTECH','AXISBANK','ASIANPAINT',
+  'MARUTI','SUNPHARMA','TATASTEEL','ULTRACEMCO','POWERGRID','NTPC','NESTLEIND',
+  'TECHM','TITAN','TATAMOTORS','JSWSTEEL','LT','M&M','INDUSINDBK','TATACONSUM',
+  'ONGC','COALINDIA','ADANIPORTS','ADANIENT','BAJAJFINSV','BAJAJ-AUTO','HEROMOTOCO',
+  'CIPLA','DIVISLAB','DRREDDY','EICHERMOT','GRASIM','HDFCLIFE','SBILIFE','BPCL',
+  'BRITANNIA','APOLLOHOSP','TRENT','SHRIRAMFIN','HINDALCO',
+];
+
 function mapBackendSignal(r: any): LiveSignal {
   const isBuy = (r.signal as string).includes('BUY');
   const isSell = (r.signal as string).includes('SELL');
@@ -148,51 +159,43 @@ function ResultCard({ signal, onClick }: { signal: LiveSignal; onClick: () => vo
   );
 }
 
-// ─── Live scanning progress panel ────────────────────────────────────────────
+// ─── Scanning progress panel ──────────────────────────────────────────────────
 function ScanProgressPanel({
-  progress, total, currentSymbol, liveResults, elapsed,
+  progress, total, currentSymbol, elapsed, finalizing,
 }: {
   progress: number;
   total: number;
   currentSymbol: string;
-  liveResults: LiveSignal[];
   elapsed: number;
+  finalizing: boolean;
 }) {
-  const pct = total > 0 ? Math.round((progress / total) * 100) : 0;
-  const liveBuys = liveResults.filter(s => s.signal.includes('BUY'));
-  const liveSells = liveResults.filter(s => s.signal.includes('SELL'));
-  const liveNeutral = liveResults.filter(s => s.signal === 'NEUTRAL');
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll live results to bottom as new ones arrive
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [liveResults.length]);
+  const pct = finalizing ? 100 : (total > 0 ? Math.round((progress / total) * 100) : 0);
 
   return (
     <div className="px-4 space-y-4">
-      {/* Big progress card */}
       <div className="glass-panel border border-accent/30 rounded-2xl p-4">
-        {/* Header row */}
+        {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
-            <span className="text-xs font-bold text-accent">LIVE SCANNING</span>
+            <span className="text-xs font-bold text-accent">
+              {finalizing ? 'FINALIZING...' : 'LIVE SCANNING'}
+            </span>
           </div>
-          <span className="text-xs text-muted-foreground font-mono">{elapsed}s elapsed</span>
+          <span className="text-xs text-muted-foreground font-mono">{elapsed}s</span>
         </div>
 
-        {/* Current stock badge */}
+        {/* Current stock */}
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center font-bold text-accent text-base animate-pulse flex-shrink-0">
+          <div className="w-10 h-10 rounded-full bg-accent/10 border border-accent/30 flex items-center justify-center font-bold text-accent text-base flex-shrink-0" style={{ animation: 'pulse 1s ease-in-out infinite' }}>
             {currentSymbol ? currentSymbol[0] : '?'}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] text-muted-foreground">Currently analyzing</p>
+            <p className="text-[10px] text-muted-foreground">
+              {finalizing ? 'Processing results' : 'Analyzing'}
+            </p>
             <p className="text-sm font-bold text-foreground font-mono truncate">
-              {currentSymbol || 'Initializing...'}
+              {finalizing ? 'Sorting signals...' : (currentSymbol || 'Initializing...')}
             </p>
           </div>
           <div className="text-right flex-shrink-0">
@@ -201,70 +204,60 @@ function ScanProgressPanel({
           </div>
         </div>
 
-        {/* Wide progress bar */}
+        {/* Progress bar */}
         <div className="h-3 bg-input rounded-full overflow-hidden mb-3">
           <motion.div
             className="h-full rounded-full"
             style={{ background: 'linear-gradient(90deg, #00C896, #00FF88)' }}
             animate={{ width: `${pct}%` }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
+            transition={{ duration: 0.35, ease: 'easeOut' }}
           />
         </div>
 
-        {/* Live signal counters */}
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-primary/10 border border-primary/20 rounded-xl p-2 text-center">
-            <p className="text-lg font-black text-primary leading-none">{liveBuys.length}</p>
-            <p className="text-[9px] text-primary/70 mt-0.5 font-bold">BUY</p>
-          </div>
-          <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-2 text-center">
-            <p className="text-lg font-black text-destructive leading-none">{liveSells.length}</p>
-            <p className="text-[9px] text-destructive/70 mt-0.5 font-bold">SELL</p>
-          </div>
-          <div className="bg-input border border-border rounded-xl p-2 text-center">
-            <p className="text-lg font-black text-muted-foreground leading-none">{liveNeutral.length}</p>
-            <p className="text-[9px] text-muted-foreground/70 mt-0.5 font-bold">NEUTRAL</p>
-          </div>
-        </div>
+        {/* Steps label */}
+        <p className="text-[10px] text-muted-foreground text-center">
+          {finalizing
+            ? 'Applying filters · Sorting by signal strength'
+            : `Fetching candles · Running 25+ indicators · Detecting patterns`}
+        </p>
       </div>
 
-      {/* Live results stream */}
-      {liveResults.length > 0 && (
+      {/* Stock progress list (scrolling ticker) */}
+      {!finalizing && progress > 0 && (
         <div>
           <p className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-1.5">
             <Activity size={11} className="text-accent" />
-            Signals found so far
-            <span className="ml-auto text-accent">{liveResults.filter(s => s.signal !== 'NEUTRAL').length} actionable</span>
+            Stocks scanned
           </p>
-          <div ref={scrollRef} className="space-y-1.5 max-h-64 overflow-y-auto no-scrollbar">
-            <AnimatePresence initial={false}>
-              {liveResults.slice().reverse().map(s => (
-                <motion.div
-                  key={s.id}
-                  initial={{ opacity: 0, x: -12 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.25 }}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-input/50 border border-border rounded-xl"
-                >
-                  <div className="w-6 h-6 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center font-bold text-accent text-[10px] flex-shrink-0">
-                    {s.symbol[0]}
-                  </div>
-                  <span className="font-mono text-xs font-bold text-foreground flex-1">{s.symbol}</span>
-                  <SignalBadge sig={s.signal} />
-                  {s.confidence > 0 && (
-                    <span className="text-[10px] text-muted-foreground font-mono">{s.confidence}%</span>
-                  )}
-                </motion.div>
-              ))}
-            </AnimatePresence>
+          <div className="space-y-1 max-h-52 overflow-hidden relative">
+            {/* Show last 6 scanned stocks */}
+            {NIFTY50_NAMES.slice(Math.max(0, progress - 6), progress).reverse().map((name, i) => (
+              <motion.div
+                key={name}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: i === 0 ? 1 : 0.4 - i * 0.05, x: 0 }}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border ${
+                  i === 0
+                    ? 'bg-accent/10 border-accent/30'
+                    : 'bg-input/40 border-border/50'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[9px] flex-shrink-0 ${
+                  i === 0 ? 'bg-accent text-background' : 'bg-muted text-muted-foreground'
+                }`}>
+                  {name[0]}
+                </div>
+                <span className={`font-mono text-xs font-bold flex-1 ${i === 0 ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  {name}
+                </span>
+                {i === 0 ? (
+                  <Loader2 size={11} className="animate-spin text-accent" />
+                ) : (
+                  <CheckCircle size={11} className="text-primary/60" />
+                )}
+              </motion.div>
+            ))}
           </div>
-        </div>
-      )}
-
-      {liveResults.length === 0 && (
-        <div className="flex items-center justify-center gap-2 py-4 text-muted-foreground">
-          <Loader2 size={14} className="animate-spin" />
-          <span className="text-xs">Fetching candles from Angel One...</span>
         </div>
       )}
     </div>
@@ -278,31 +271,59 @@ export function ScannerScreen() {
   const [allResults, setAllResults] = useState<LiveSignal[]>([]);
   const [filteredResults, setFilteredResults] = useState<LiveSignal[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [total, setTotal] = useState(50);
-  const [currentSymbol, setCurrentSymbol] = useState('');
   const [scanned, setScanned] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  // Live results that stream in during scanning
-  const [liveResults, setLiveResults] = useState<LiveSignal[]>([]);
+
+  // Simulated progress state
+  const [simProgress, setSimProgress] = useState(0);
+  const [simSymbol, setSimSymbol] = useState('');
   const [elapsed, setElapsed] = useState(0);
+  const [finalizing, setFinalizing] = useState(false);
+
+  const simRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const buys = filteredResults.filter(s => s.signal.includes('BUY'));
   const sells = filteredResults.filter(s => s.signal.includes('SELL'));
   const neutral = filteredResults.filter(s => s.signal === 'NEUTRAL');
 
+  // Start simulated progress ticker
+  const startSim = useCallback(() => {
+    let step = 0;
+    setSimProgress(0);
+    setSimSymbol(NIFTY50_NAMES[0]);
+    setElapsed(0);
+    setFinalizing(false);
+
+    simRef.current = setInterval(() => {
+      step = Math.min(step + 1, NIFTY50_NAMES.length - 1);
+      setSimProgress(step);
+      setSimSymbol(NIFTY50_NAMES[step]);
+      // Stop advancing at 95% — hold there until real data arrives
+      if (step >= NIFTY50_NAMES.length - 1 && simRef.current) {
+        clearInterval(simRef.current);
+        simRef.current = null;
+      }
+    }, 80); // 80ms per stock → ~4s for 50 stocks
+
+    elapsedRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+  }, []);
+
+  const stopSim = useCallback(() => {
+    if (simRef.current) { clearInterval(simRef.current); simRef.current = null; }
+    if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null; }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => () => { stopSim(); }, [stopSim]);
+
   const scanAll = useCallback(async () => {
     setScanning(true);
-    setProgress(0);
-    setTotal(50);
-    setScanError(null);
     setScanned(false);
-    setLiveResults([]);
-    setElapsed(0);
-
-    // Start elapsed timer
-    elapsedRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+    setScanError(null);
+    setAllResults([]);
+    setFilteredResults([]);
+    startSim();
 
     try {
       const res = await fetch('/api/signals/scanner/run', {
@@ -311,54 +332,30 @@ export function ScannerScreen() {
         body: JSON.stringify({ interval: 'FIFTEEN_MINUTE', minConfidence: 40 }),
       });
 
-      if (!res.ok || !res.body) {
-        throw new Error(`Server error: ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error ?? 'Scan failed');
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      // Snap progress to done and show finalizing briefly
+      stopSim();
+      setSimProgress(NIFTY50_NAMES.length);
+      setSimSymbol('');
+      setFinalizing(true);
 
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
+      await new Promise(r => setTimeout(r, 600)); // brief "Finalizing..." display
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.done && Array.isArray(evt.results)) {
-              // Final event — replace with server-sorted/filtered results
-              const mapped: LiveSignal[] = evt.results.map(mapBackendSignal);
-              setAllResults(mapped);
-              setFilteredResults(applyScreenerFilter(mapped, activeFilter));
-              setScanned(true);
-            } else {
-              // Progress event with optional individual result
-              if (evt.scanned !== undefined) setProgress(Number(evt.scanned));
-              if (evt.total !== undefined) setTotal(Number(evt.total));
-              if (evt.currentStock) setCurrentSymbol(String(evt.currentStock).replace('-EQ', ''));
-              // Stream individual result into live panel
-              if (evt.result) {
-                const mapped = mapBackendSignal(evt.result);
-                setLiveResults(prev => [...prev, mapped]);
-              }
-            }
-          } catch { /* skip malformed */ }
-        }
-      }
+      const mapped: LiveSignal[] = (json.results ?? []).map(mapBackendSignal);
+      setAllResults(mapped);
+      setFilteredResults(applyScreenerFilter(mapped, activeFilter));
+      setScanned(true);
     } catch (err) {
       setScanError(err instanceof Error ? err.message : 'Scan failed. Check connection.');
     } finally {
+      stopSim();
+      setFinalizing(false);
       setScanning(false);
-      setCurrentSymbol('');
-      if (elapsedRef.current) clearInterval(elapsedRef.current);
     }
-  }, [activeFilter]);
+  }, [activeFilter, startSim, stopSim]);
 
   const changeFilter = (id: string) => {
     setActiveFilter(id);
@@ -436,8 +433,8 @@ export function ScannerScreen() {
           {scanning ? (
             <>
               <Activity size={16} className="animate-pulse" />
-              Scanning {progress}/{total}
-              {currentSymbol ? ` — ${currentSymbol}` : ''}
+              Scanning {simProgress}/{NIFTY50_NAMES.length}
+              {simSymbol ? ` — ${simSymbol}` : ''}
             </>
           ) : (
             <>
@@ -454,21 +451,22 @@ export function ScannerScreen() {
         )}
       </div>
 
-      {/* Live progress panel (replaces results area while scanning) */}
+      {/* Content area */}
       <AnimatePresence mode="wait">
+        {/* Progress panel while scanning */}
         {scanning && (
           <motion.div
             key="scanning"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            exit={{ opacity: 0, transition: { duration: 0.2 } }}
           >
             <ScanProgressPanel
-              progress={progress}
-              total={total}
-              currentSymbol={currentSymbol}
-              liveResults={liveResults}
+              progress={simProgress}
+              total={NIFTY50_NAMES.length}
+              currentSymbol={simSymbol}
               elapsed={elapsed}
+              finalizing={finalizing}
             />
           </motion.div>
         )}
@@ -477,7 +475,7 @@ export function ScannerScreen() {
         {scanned && !scanning && (
           <motion.div
             key="results"
-            initial={{ opacity: 0, y: 8 }}
+            initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="px-4 space-y-4"
           >

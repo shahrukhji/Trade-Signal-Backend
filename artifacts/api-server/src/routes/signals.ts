@@ -120,41 +120,23 @@ router.post("/scanner/run", async (req, res) => {
       minConfidence?: number;
     };
 
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache");
-    res.setHeader("Connection", "keep-alive");
-    res.flushHeaders();
-
     const total = NIFTY50.length;
     const results: ReturnType<typeof generateSignal>[] = [];
 
-    // Helper: guaranteed flush between SSE events so each arrives as a separate chunk
-    const emit = (payload: object) => {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
-      // Flush compression middleware if present
-      if (typeof (res as any).flush === 'function') (res as any).flush();
-    };
-    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-
-    // Process stocks sequentially so each emit() reaches the browser as a distinct chunk.
-    // 60 ms minimum gap ensures cached-data scans still show live progress in the UI.
-    for (const stock of NIFTY50) {
-      const t0 = Date.now();
-      let result: ReturnType<typeof generateSignal> | null = null;
-      try {
-        const candles = await fetchCandles(stock.token, interval);
-        if (candles.length >= 20) {
-          result = generateSignal(stock.symbol, candles);
-          results.push(result);
-        }
-      } catch {}
-
-      emit({ scanned: results.length, total, currentStock: stock.symbol, result: result ?? null });
-
-      // If candles were cached the whole thing took <5 ms — pad to 60 ms so the
-      // browser has time to paint the progress update before the next event arrives.
-      const elapsed = Date.now() - t0;
-      if (elapsed < 60) await sleep(60 - elapsed);
+    // Process all stocks in parallel batches for maximum speed
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < NIFTY50.length; i += BATCH_SIZE) {
+      const batch = NIFTY50.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (stock) => {
+          try {
+            const candles = await fetchCandles(stock.token, interval);
+            if (candles.length >= 20) {
+              results.push(generateSignal(stock.symbol, candles));
+            }
+          } catch {}
+        })
+      );
     }
 
     const filtered = results
@@ -167,8 +149,7 @@ router.post("/scanner/run", async (req, res) => {
         return (order[a.signal] ?? 3) - (order[b.signal] ?? 3);
       });
 
-    res.write(`data: ${JSON.stringify({ done: true, results: filtered })}\n\n`);
-    res.end();
+    res.json({ success: true, total, scanned: results.length, results: filtered });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Scanner failed";
     if (!res.headersSent) res.status(500).json({ error: msg });
