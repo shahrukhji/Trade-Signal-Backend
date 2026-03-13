@@ -99,7 +99,7 @@ router.get("/", async (req, res) => {
           "STRONG_BUY" | "BUY" | "NEUTRAL" | "SELL" | "STRONG_SELL",
         score: r.confidence,
         indicators: (r.reasons ?? []).map((s: string) => s.replace(/ \([+-]\d+\)$/, "")),
-        rsi: (r.indicators as Record<string, { value?: number } | undefined>)?.rsi?.value,
+        rsi: (r.indicators as unknown as Record<string, { value?: number } | undefined>)?.rsi?.value,
         ltp: r.entry,
         target1: r.target1,
         stopLoss: r.stopLoss,

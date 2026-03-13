@@ -308,13 +308,36 @@ router.post("/cross-verify", async (req, res) => {
       recentPrices,
     });
 
-    const geminiResponse = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: { temperature: 0.2, maxOutputTokens: 8192, responseMimeType: "application/json" },
-    });
+    // Supported Replit AI Integration models (per skill docs):
+    // gemini-2.5-flash, gemini-2.5-pro, gemini-3-flash-preview, gemini-3-pro-preview
+    const GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview"];
+    let rawText = "";
+    let lastErr: unknown;
+    for (const model of GEMINI_MODELS) {
+      try {
+        console.log(`[AI Cross-Verify] Trying model: ${model}`);
+        const resp = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: { temperature: 0.2, maxOutputTokens: 8192 },
+        });
+        rawText = resp.text ?? "";
+        if (rawText) {
+          console.log(`[AI Cross-Verify] Success with ${model}, length: ${rawText.length}`);
+          break;
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error(`[AI Cross-Verify] ${model} failed: ${msg}`);
+        lastErr = e;
+      }
+    }
 
-    const rawText = geminiResponse.text ?? "";
+    if (!rawText) {
+      const errMsg = lastErr instanceof Error ? lastErr.message : "All Gemini models failed";
+      throw new Error(errMsg);
+    }
+
     const aiResult = parseAIResponse(rawText);
 
     res.json({
@@ -343,7 +366,9 @@ router.post("/cross-verify", async (req, res) => {
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Cross-verify failed";
-    console.error("[AI Cross-Verify] Error:", msg);
+    const stack = err instanceof Error ? err.stack : "";
+    console.error("[AI Cross-Verify] Fatal error:", msg);
+    if (stack) console.error(stack);
     res.status(500).json({ error: msg });
   }
 });
