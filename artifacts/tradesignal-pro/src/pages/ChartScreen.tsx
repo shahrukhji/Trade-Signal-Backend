@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useLocation } from 'wouter';
-import { Search, BrainCircuit, Activity, Plus, TrendingUp, TrendingDown, Sparkles, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp, X, Zap, Shield } from 'lucide-react';
+import { BrainCircuit, Activity, TrendingUp, TrendingDown, Sparkles, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp, X, Zap, Shield } from 'lucide-react';
+import { StockSearch } from '@/components/StockSearch';
+import type { StockSearchResult } from '@/components/StockSearch';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartWidget } from '@/components/ChartWidget';
 import { useMarketData, useIndicators, useSignalAnalysis } from '@/hooks/use-trading';
@@ -342,6 +344,20 @@ export function ChartScreen() {
   const { analyze, analyzing, result, setResult } = useSignalAnalysis();
   const { toast } = useToast();
 
+  // Resolved token + exchange from StockSearch (needed for trading)
+  const [stockToken, setStockToken] = useState('');
+  const [stockExchange, setStockExchange] = useState('NSE');
+  const [stockCompanyName, setStockCompanyName] = useState('');
+
+  const handleStockSelect = useCallback((stock: StockSearchResult) => {
+    setSymbol(stock.tradingSymbol);
+    setStockToken(stock.symbolToken);
+    setStockExchange(stock.exchange);
+    setStockCompanyName(stock.companyName);
+    setResult(null);
+    setCrossVerifyResult(null);
+  }, [setResult]);
+
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [orderMode, setOrderMode] = useState<'paper' | 'live'>('paper');
   const [placing, setPlacing] = useState(false);
@@ -401,33 +417,30 @@ export function ChartScreen() {
     <div className="relative min-h-screen pb-8">
       {/* Header */}
       <div className="p-4 bg-background z-20 relative">
-        <div className="flex gap-2 mb-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} />
-            <input
-              type="text"
-              value={symbol}
-              onChange={e => setSymbol(e.target.value.toUpperCase())}
-              className="w-full bg-input border border-border rounded-xl h-12 pl-10 pr-4 text-foreground focus:border-accent focus:ring-1 focus:ring-accent outline-none font-mono text-sm"
-              placeholder="Search symbol (e.g. TCS-EQ)"
-            />
-          </div>
-          <button className="w-12 h-12 bg-card border border-border rounded-xl flex items-center justify-center text-foreground active:scale-95 transition-transform">
-            <Plus size={20} />
-          </button>
+        {/* Full stock search — all NSE/BSE/MCX stocks & commodities */}
+        <div className="mb-3">
+          <StockSearch
+            onSelectStock={handleStockSelect}
+            placeholder="Search stocks, F&O, commodities..."
+          />
         </div>
 
         <div className="flex justify-between items-end">
           <div>
             <h1 className="text-2xl font-bold font-mono text-foreground flex items-center gap-2">
               {symbol.replace('-EQ', '')}
-              <span className="bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 rounded font-sans">NSE</span>
+              <span className="bg-accent/20 text-accent text-[10px] px-1.5 py-0.5 rounded font-sans">
+                {stockExchange || 'NSE'}
+              </span>
               {liveSignal && (
                 <span className={`text-[10px] px-2 py-0.5 rounded font-sans font-bold ${SIGNAL_BG[liveSignal.signal] || 'bg-muted text-muted-foreground'}`}>
                   {liveSignal.signal.replace('_', ' ')}
                 </span>
               )}
             </h1>
+            {stockCompanyName && (
+              <p className="text-xs text-muted-foreground mt-0.5 truncate max-w-[200px]">{stockCompanyName}</p>
+            )}
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xl font-mono font-medium">₹{currentPrice.toFixed(2)}</span>
               <span className={`text-sm font-mono font-medium flex items-center gap-0.5 ${change >= 0 ? 'text-primary' : 'text-destructive'}`}>
@@ -771,32 +784,17 @@ export function ChartScreen() {
                     const isSell = result.signal?.includes('SELL');
                     const sym = result.symbol ?? symbol;
 
-                    // Look up symboltoken from NIFTY50 list
-                    const tokenLookup: Record<string, string> = {
-                      'RELIANCE-EQ':'2885','TCS-EQ':'11536','HDFCBANK-EQ':'1333','INFY-EQ':'1594',
-                      'ICICIBANK-EQ':'4963','SBIN-EQ':'3045','BAJFINANCE-EQ':'317','BHARTIARTL-EQ':'10604',
-                      'KOTAKBANK-EQ':'1922','WIPRO-EQ':'3787','HCLTECH-EQ':'7229','AXISBANK-EQ':'5900',
-                      'ASIANPAINT-EQ':'236','MARUTI-EQ':'10999','SUNPHARMA-EQ':'3351','TATASTEEL-EQ':'3499',
-                      'ULTRACEMCO-EQ':'11532','POWERGRID-EQ':'14977','NTPC-EQ':'11630','NESTLEIND-EQ':'17963',
-                      'TECHM-EQ':'13538','TITAN-EQ':'3506','JSWSTEEL-EQ':'11723','LT-EQ':'11483',
-                      'M&M-EQ':'2031','INDUSINDBK-EQ':'5258','TATACONSUM-EQ':'3432','ONGC-EQ':'2475',
-                      'HINDUNILVR-EQ':'1394','ITC-EQ':'1660','CIPLA-EQ':'694','DRREDDY-EQ':'881',
-                      'EICHERMOT-EQ':'910','GRASIM-EQ':'1232','HDFCLIFE-EQ':'467','SBILIFE-EQ':'21808',
-                      'BPCL-EQ':'526','BRITANNIA-EQ':'547','APOLLOHOSP-EQ':'157','TRENT-EQ':'1964',
-                      'SHRIRAMFIN-EQ':'4306','HINDALCO-EQ':'1363','COALINDIA-EQ':'20374',
-                      'ADANIPORTS-EQ':'15083','ADANIENT-EQ':'25','BAJAJFINSV-EQ':'16675',
-                      'BAJAJ-AUTO-EQ':'16669','HEROMOTOCO-EQ':'1348','DIVISLAB-EQ':'10940',
-                    };
-                    const symboltoken = tokenLookup[sym] ?? '';
+                    // Use token resolved from StockSearch; falls back to result token
+                    const symboltoken = stockToken || (result as any)?.symboltoken || '';
 
                     setPlacing(true);
                     try {
                       const body = {
-                        variety: orderMode === 'live' ? 'NORMAL' : 'NORMAL',
+                        variety: 'NORMAL',
                         tradingsymbol: sym,
                         symboltoken,
                         transactiontype: isSell ? 'SELL' : 'BUY',
-                        exchange: 'NSE',
+                        exchange: stockExchange || 'NSE',
                         ordertype: 'LIMIT',
                         producttype: 'INTRADAY',
                         duration: 'DAY',

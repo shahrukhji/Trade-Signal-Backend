@@ -1,9 +1,13 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ScanLine, Download, TrendingUp, TrendingDown, Minus, Activity, CheckCircle, Loader2 } from 'lucide-react';
+import { ScanLine, Download, TrendingUp, TrendingDown, Minus, Activity, CheckCircle, Loader2, Search, Zap, Target, ShieldAlert } from 'lucide-react';
 import { SCREENER_FILTERS, applyScreenerFilter } from '@/engine/screener';
 import type { LiveSignal } from '@/engine/signalEngine';
 import { useLocation } from 'wouter';
+import { StockSearch } from '@/components/StockSearch';
+import type { StockSearchResult } from '@/components/StockSearch';
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 
 const fmtINR = (n: number) =>
   `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(n)}`;
@@ -264,9 +268,200 @@ function ScanProgressPanel({
   );
 }
 
+// ─── Custom single-stock scan ─────────────────────────────────────────────────
+function CustomStockScan() {
+  const [, navigate] = useLocation();
+  const [selected, setSelected] = useState<StockSearchResult | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [result, setResult] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const runScan = useCallback(async () => {
+    if (!selected) return;
+    setScanning(true);
+    setResult(null);
+    setError(null);
+    try {
+      const res = await fetch(`${BASE}/api/signals/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: selected.tradingSymbol,
+          symboltoken: selected.symbolToken,
+          exchange: selected.exchange,
+          interval: 'FIFTEEN_MINUTE',
+        }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error ?? 'Analysis failed');
+      setResult(json.signal);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Analysis failed');
+    } finally {
+      setScanning(false);
+    }
+  }, [selected]);
+
+  const sig = result?.signal ?? '';
+  const isBuy = sig.includes('BUY');
+  const isSell = sig.includes('SELL');
+  const signalColor = isBuy ? 'text-primary' : isSell ? 'text-destructive' : 'text-muted-foreground';
+  const signalBg = isBuy ? 'bg-primary/10 border-primary/20' : isSell ? 'bg-destructive/10 border-destructive/20' : 'bg-input border-border';
+
+  return (
+    <div className="px-4 space-y-3">
+      {/* Search */}
+      <StockSearch
+        onSelectStock={s => { setSelected(s); setResult(null); setError(null); }}
+        placeholder="Search any stock, F&O, commodity..."
+      />
+
+      {/* Selected stock chip + scan button */}
+      {selected && !scanning && !result && (
+        <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="space-y-2">
+          <div className="flex items-center gap-3 px-3 py-2.5 bg-accent/10 border border-accent/30 rounded-xl">
+            <div className="w-8 h-8 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center font-bold text-accent text-sm flex-shrink-0">
+              {selected.tradingSymbol[0]}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold text-sm text-foreground font-mono">{selected.tradingSymbol}</p>
+              <p className="text-[10px] text-muted-foreground truncate">{selected.companyName} · {selected.exchange}</p>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-accent/20 text-accent border border-accent/30 font-bold">
+              {selected.instrumentType}
+            </span>
+          </div>
+          <button
+            onClick={runScan}
+            className="w-full h-12 rounded-2xl bg-accent text-background font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all"
+          >
+            <Zap size={16} /> Run Deep Scan — 20 Algos
+          </button>
+        </motion.div>
+      )}
+
+      {/* Scanning state */}
+      {scanning && (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="glass-panel border border-accent/30 rounded-2xl p-4 text-center">
+          <Loader2 size={28} className="animate-spin text-accent mx-auto mb-2" />
+          <p className="text-sm font-bold text-foreground">Analyzing {selected?.tradingSymbol}</p>
+          <p className="text-xs text-muted-foreground mt-1">Running 20 signal algos · Fetching live 15m candles</p>
+          <div className="mt-3 h-1.5 bg-input rounded-full overflow-hidden">
+            <motion.div
+              className="h-full bg-accent rounded-full"
+              animate={{ width: ['0%', '90%'] }}
+              transition={{ duration: 3, ease: 'easeOut' }}
+            />
+          </div>
+        </motion.div>
+      )}
+
+      {/* Result card */}
+      {result && !scanning && (
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
+          {/* Signal header */}
+          <div className={`glass-panel border rounded-2xl p-4 ${signalBg}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <p className="text-xs text-muted-foreground">Signal</p>
+                <p className={`text-xl font-black font-mono ${signalColor}`}>
+                  {isBuy ? '🟢' : isSell ? '🔴' : '⚪'} {sig.replace('_', ' ')}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-muted-foreground">Confidence</p>
+                <p className={`text-2xl font-black font-mono ${signalColor}`}>{result.confidence}%</p>
+              </div>
+            </div>
+            {/* Price levels */}
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="bg-background/40 rounded-xl p-2 text-center">
+                <p className="text-[9px] text-muted-foreground">ENTRY</p>
+                <p className="text-xs font-bold font-mono text-foreground">{fmtINR(result.entry ?? 0)}</p>
+              </div>
+              <div className="bg-destructive/10 rounded-xl p-2 text-center">
+                <p className="text-[9px] text-destructive/80">STOP LOSS</p>
+                <p className="text-xs font-bold font-mono text-destructive">{fmtINR(result.stopLoss ?? 0)}</p>
+              </div>
+              <div className="bg-primary/10 rounded-xl p-2 text-center">
+                <p className="text-[9px] text-primary/80">TARGET 1</p>
+                <p className="text-xs font-bold font-mono text-primary">{fmtINR(result.target1 ?? 0)}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <Target size={11} /> R:R {result.riskReward?.toFixed(2) ?? '—'}
+              </span>
+              <span className="text-muted-foreground flex items-center gap-1">
+                <ShieldAlert size={11} /> Score {result.score > 0 ? '+' : ''}{result.score}
+              </span>
+            </div>
+          </div>
+
+          {/* Algo reasons */}
+          {result.reasons?.length > 0 && (
+            <div className="glass-panel border border-border rounded-2xl p-3">
+              <p className="text-xs font-bold text-muted-foreground mb-2 flex items-center gap-1">
+                <Activity size={11} className="text-accent" /> Signal Reasons ({result.reasons.length} algos)
+              </p>
+              <div className="space-y-1 max-h-40 overflow-y-auto no-scrollbar">
+                {(result.reasons as string[]).map((r, i) => {
+                  const isPos = r.includes('(+');
+                  const isNeg = r.includes('(-');
+                  return (
+                    <div key={i} className={`text-[11px] px-2 py-1 rounded-lg ${isPos ? 'text-primary bg-primary/5' : isNeg ? 'text-destructive bg-destructive/5' : 'text-muted-foreground bg-input/50'}`}>
+                      {isPos ? '▲' : isNeg ? '▼' : '—'} {r}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate(`/charts?symbol=${selected?.tradingSymbol}`)}
+              className="flex-1 py-3 rounded-xl bg-accent text-background font-bold text-sm active:scale-95 transition-all"
+            >
+              Open Chart
+            </button>
+            <button
+              onClick={() => { setResult(null); }}
+              className="px-4 py-3 rounded-xl bg-input border border-border text-muted-foreground font-bold text-sm active:scale-95 transition-all"
+            >
+              Reset
+            </button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="px-3 py-2 bg-destructive/10 border border-destructive/20 rounded-lg text-xs text-destructive">
+          {error}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!selected && !scanning && !result && (
+        <div className="text-center py-10 text-muted-foreground px-4">
+          <Search size={36} className="mx-auto mb-3 opacity-20" />
+          <p className="text-sm font-medium">Search any stock or commodity</p>
+          <p className="text-xs mt-2 leading-relaxed">
+            NSE · BSE · MCX · F&O · Indices<br />
+            Runs 20 signal algos on real 15-min candles
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 export function ScannerScreen() {
   const [, navigate] = useLocation();
+  const [scanMode, setScanMode] = useState<'batch' | 'custom'>('batch');
   const [activeFilter, setActiveFilter] = useState('all');
   const [allResults, setAllResults] = useState<LiveSignal[]>([]);
   const [filteredResults, setFilteredResults] = useState<LiveSignal[]>([]);
@@ -376,29 +571,46 @@ export function ScannerScreen() {
   return (
     <div className="pb-6 pt-4">
       {/* Header */}
-      <div className="px-4 flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
-            <ScanLine size={18} className="text-accent" /> Smart Scanner
-          </h1>
-          {scanned && !scanning && (
-            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-              <CheckCircle size={10} className="text-primary" />
-              <span className="text-primary font-bold">{buys.length} Buy</span>
-              {' '}·{' '}
-              <span className="text-destructive font-bold">{sells.length} Sell</span>
-              {' '}·{' '}
-              <span>{neutral.length} Neutral</span>
-              {' '}· Live Angel One data
-            </p>
-          )}
-        </div>
-        {scanned && !scanning && (
+      <div className="px-4 flex items-center justify-between mb-3">
+        <h1 className="text-xl font-bold text-foreground flex items-center gap-2">
+          <ScanLine size={18} className="text-accent" /> Smart Scanner
+        </h1>
+        {scanned && !scanning && scanMode === 'batch' && (
           <button onClick={exportCSV} className="p-2 rounded-xl bg-input border border-border text-muted-foreground" title="Copy CSV">
             <Download size={14} />
           </button>
         )}
       </div>
+
+      {/* Mode tabs */}
+      <div className="px-4 mb-3 flex gap-2">
+        <button
+          onClick={() => setScanMode('batch')}
+          className={`flex-1 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+            scanMode === 'batch'
+              ? 'bg-accent text-background border-accent'
+              : 'bg-input text-muted-foreground border-border'
+          }`}
+        >
+          <ScanLine size={13} /> NIFTY50 Batch Scan
+        </button>
+        <button
+          onClick={() => setScanMode('custom')}
+          className={`flex-1 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 border transition-all ${
+            scanMode === 'custom'
+              ? 'bg-accent text-background border-accent'
+              : 'bg-input text-muted-foreground border-border'
+          }`}
+        >
+          <Search size={13} /> Any Stock / F&O
+        </button>
+      </div>
+
+      {/* Custom scan mode */}
+      {scanMode === 'custom' && <CustomStockScan />}
+
+      {/* Batch scan mode — filter chips + scan button + results */}
+      {scanMode === 'batch' && <>
 
       {/* Filter Chips */}
       <div className="flex gap-2 overflow-x-auto no-scrollbar px-4 pb-3">
@@ -548,6 +760,7 @@ export function ScannerScreen() {
           </motion.div>
         )}
       </AnimatePresence>
+      </>}
     </div>
   );
 }
