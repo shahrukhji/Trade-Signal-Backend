@@ -235,10 +235,13 @@ export function Portfolio() {
 
         {/* Show balance error inline if funds unavailable */}
         {summary?.balanceError && (
-          <div className="flex items-start gap-2 mb-3 bg-orange-500/10 border border-orange-500/20 rounded-xl p-2.5">
-            <AlertCircle size={12} className="text-orange-400 shrink-0 mt-0.5" />
-            <p className="text-[10px] text-orange-300 leading-relaxed">
-              Balance unavailable: {summary.balanceError.split('(')[0].trim()}
+          <div className="mb-3 bg-orange-500/10 border border-orange-500/20 rounded-xl p-2.5">
+            <div className="flex items-center gap-1.5 mb-1">
+              <AlertCircle size={11} className="text-orange-400 shrink-0" />
+              <p className="text-[10px] font-bold text-orange-300">Funds data unavailable (AB1004)</p>
+            </div>
+            <p className="text-[9px] text-muted-foreground leading-relaxed">
+              Enable <span className="text-orange-300 font-semibold">Funds/RMS</span> permission in your Angel One Developer Portal → My API → Edit API Key. Or deposit funds if account is unfunded.
             </p>
           </div>
         )}
@@ -388,14 +391,20 @@ export function Portfolio() {
                   </div>
                 )}
                 {!loading && !balance && summary?.balanceError && (
-                  <div className="flex gap-2 items-start bg-orange-500/10 border border-orange-500/20 rounded-xl p-3">
-                    <AlertCircle size={13} className="text-orange-400 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-bold text-orange-300">Margin data unavailable</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{summary.balanceError}</p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-1">
-                        Angel One's getRMS API may be temporarily down. Try refreshing.
-                      </p>
+                  <div className="bg-orange-500/10 border border-orange-500/20 rounded-xl p-3">
+                    <div className="flex gap-2 items-start mb-2">
+                      <AlertCircle size={13} className="text-orange-400 shrink-0 mt-0.5" />
+                      <p className="text-xs font-bold text-orange-300">Funds data unavailable (AB1004)</p>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground leading-relaxed mb-2">
+                      Angel One's <span className="text-foreground font-medium">getRMS</span> API is returning no data for this account.
+                    </p>
+                    <div className="bg-black/20 rounded-lg p-2 space-y-1">
+                      <p className="text-[9px] text-orange-300 font-semibold uppercase tracking-wider">How to fix</p>
+                      <p className="text-[10px] text-muted-foreground">1. Open <span className="text-foreground">smartapi.angelone.in</span></p>
+                      <p className="text-[10px] text-muted-foreground">2. Go to <span className="text-foreground">My API → Edit API Key</span></p>
+                      <p className="text-[10px] text-muted-foreground">3. Enable <span className="text-orange-300 font-semibold">Funds / RMS</span> permission</p>
+                      <p className="text-[10px] text-muted-foreground">4. Or deposit funds if account is unfunded</p>
                     </div>
                   </div>
                 )}

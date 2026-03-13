@@ -418,18 +418,22 @@ export function Settings() {
                         )}
                       </div>
                     ) : (
-                      <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3">
+                      <div className="bg-orange-500/10 border border-orange-500/30 rounded-xl p-3 space-y-2">
                         <div className="flex items-start gap-2">
                           <AlertCircle size={14} className="text-orange-400 mt-0.5 shrink-0" />
                           <div>
-                            <p className="text-xs font-semibold text-orange-400 mb-0.5">Balance Unavailable</p>
+                            <p className="text-xs font-semibold text-orange-400 mb-0.5">Funds Unavailable (AB1004)</p>
                             <p className="text-[10px] text-muted-foreground leading-relaxed">
-                              {walletError || 'Angel One margin API (getRMS) is not returning data for this account.'}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground mt-1">
-                              This may be an API plan restriction or a temporary Angel One server issue.
+                              Angel One's getRMS API is not returning balance data for this account.
                             </p>
                           </div>
+                        </div>
+                        <div className="bg-black/20 rounded-lg p-2.5 space-y-1.5">
+                          <p className="text-[9px] text-orange-300 font-bold uppercase tracking-wider">How to fix</p>
+                          <p className="text-[10px] text-muted-foreground">1. Go to <span className="text-foreground font-medium">smartapi.angelone.in</span></p>
+                          <p className="text-[10px] text-muted-foreground">2. Click <span className="text-foreground font-medium">My API → Edit API Key</span></p>
+                          <p className="text-[10px] text-muted-foreground">3. Enable <span className="text-orange-300 font-semibold">Funds / RMS</span> permission &amp; save</p>
+                          <p className="text-[10px] text-muted-foreground">4. If account has no deposits, add funds first</p>
                         </div>
                       </div>
                     )}
