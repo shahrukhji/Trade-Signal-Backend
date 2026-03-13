@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, TrendingUp, TrendingDown, Zap, Shield, Target, Clock, ChevronDown, AlertCircle, CheckCircle, Loader2, Activity } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, Zap, Shield, AlertCircle, Loader2, Activity } from 'lucide-react';
 import { ChartWidget } from '@/components/ChartWidget';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
@@ -80,14 +81,14 @@ export function TradeExecuteModal({ signal, onClose, onTradeOpen }: TradeExecute
         method: 'POST',
         headers,
         body: JSON.stringify({
-          symbol: signal.symbol,
+          tradingsymbol: signal.symbol,
           symboltoken: signal.symbolToken,
           exchange: signal.exchange,
           transactiontype: isBuy ? 'BUY' : 'SELL',
           ordertype: 'MARKET',
           producttype: 'INTRADAY',
-          quantity: qty,
-          price: 0,
+          quantity: String(qty),
+          price: '0',
         }),
       });
       const json = await res.json();
@@ -120,7 +121,7 @@ export function TradeExecuteModal({ signal, onClose, onTradeOpen }: TradeExecute
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/70 backdrop-blur-sm"
       onClick={onClose}
     >
       <motion.div
@@ -379,22 +380,24 @@ export function ActiveTradeWindow({ trade, onClose }: ActiveTradeWindowProps) {
   const handleClosePosition = useCallback(async () => {
     setClosing(true);
     try {
-      const endpoint = trade.mode === 'live'
-        ? `${BASE}/api/orders/exit-position`
-        : `${BASE}/api/paper/close/${encodeURIComponent(trade.symbol)}`;
+      const isPaper = trade.mode === 'paper';
+      const endpoint = isPaper
+        ? `${BASE}/api/paper/close/${encodeURIComponent(trade.symbol)}`
+        : `${BASE}/api/orders/exit-position`;
+      const body = isPaper
+        ? JSON.stringify({ qty: trade.qty })
+        : JSON.stringify({
+            tradingSymbol: trade.symbol,
+            symbolToken: trade.symbolToken,
+            exchange: trade.exchange,
+            netQty: trade.qty,
+            side: isBuy ? 'BUY' : 'SELL',
+            productType: 'INTRADAY',
+          });
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: trade.symbol,
-          symboltoken: trade.symbolToken,
-          exchange: trade.exchange,
-          transactiontype: isBuy ? 'SELL' : 'BUY',
-          ordertype: 'MARKET',
-          producttype: 'INTRADAY',
-          quantity: trade.qty,
-          price: 0,
-        }),
+        body,
       });
       const json = await res.json();
       if (json.success !== false) {
@@ -420,7 +423,7 @@ export function ActiveTradeWindow({ trade, onClose }: ActiveTradeWindowProps) {
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background/95 backdrop-blur-md px-6"
+        className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background/95 backdrop-blur-md px-6"
       >
         <motion.div
           initial={{ scale: 0.8, opacity: 0 }}
@@ -457,7 +460,7 @@ export function ActiveTradeWindow({ trade, onClose }: ActiveTradeWindowProps) {
       initial={{ opacity: 0, y: 60 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 60 }}
-      className="fixed inset-0 z-50 bg-background flex flex-col"
+      className="fixed inset-0 z-[9999] bg-background flex flex-col"
     >
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
@@ -581,11 +584,11 @@ interface TradeFlowProps {
 export function TradeFlow({ signal, onDismiss }: TradeFlowProps) {
   const [activeTrade, setActiveTrade] = useState<ActiveTrade | null>(null);
 
-  if (!signal) return null;
+  if (!signal && !activeTrade) return null;
 
-  return (
-    <AnimatePresence>
-      {!activeTrade && (
+  return createPortal(
+    <AnimatePresence mode="wait">
+      {signal && !activeTrade && (
         <TradeExecuteModal
           key="modal"
           signal={signal}
@@ -600,6 +603,7 @@ export function TradeFlow({ signal, onDismiss }: TradeFlowProps) {
           onClose={() => { setActiveTrade(null); onDismiss(); }}
         />
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
