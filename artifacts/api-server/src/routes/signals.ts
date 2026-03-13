@@ -128,28 +128,33 @@ router.post("/scanner/run", async (req, res) => {
     const total = NIFTY50.length;
     const results: ReturnType<typeof generateSignal>[] = [];
 
-    const BATCH_SIZE = 5;
-    for (let i = 0; i < NIFTY50.length; i += BATCH_SIZE) {
-      const batch = NIFTY50.slice(i, i + BATCH_SIZE);
-      await Promise.all(
-        batch.map(async (stock) => {
-          let result: ReturnType<typeof generateSignal> | null = null;
-          try {
-            const candles = await fetchCandles(stock.token, interval);
-            if (candles.length >= 20) {
-              result = generateSignal(stock.symbol, candles);
-              results.push(result);
-            }
-          } catch {}
-          // Emit progress + the individual result immediately (null if candles insufficient)
-          res.write(`data: ${JSON.stringify({
-            scanned: results.length,
-            total,
-            currentStock: stock.symbol,
-            result: result ?? null,
-          })}\n\n`);
-        })
-      );
+    // Helper: guaranteed flush between SSE events so each arrives as a separate chunk
+    const emit = (payload: object) => {
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      // Flush compression middleware if present
+      if (typeof (res as any).flush === 'function') (res as any).flush();
+    };
+    const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+    // Process stocks sequentially so each emit() reaches the browser as a distinct chunk.
+    // 60 ms minimum gap ensures cached-data scans still show live progress in the UI.
+    for (const stock of NIFTY50) {
+      const t0 = Date.now();
+      let result: ReturnType<typeof generateSignal> | null = null;
+      try {
+        const candles = await fetchCandles(stock.token, interval);
+        if (candles.length >= 20) {
+          result = generateSignal(stock.symbol, candles);
+          results.push(result);
+        }
+      } catch {}
+
+      emit({ scanned: results.length, total, currentStock: stock.symbol, result: result ?? null });
+
+      // If candles were cached the whole thing took <5 ms — pad to 60 ms so the
+      // browser has time to paint the progress update before the next event arrives.
+      const elapsed = Date.now() - t0;
+      if (elapsed < 60) await sleep(60 - elapsed);
     }
 
     const filtered = results
