@@ -62,6 +62,7 @@ export interface LiveSignal {
   symbol: string;
   stockName: string;
   exchange: string;
+  symbolToken?: string;
   timeframe: string;
   timestamp: number;
   signal: SignalType;

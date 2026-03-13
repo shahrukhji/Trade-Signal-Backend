@@ -6,6 +6,8 @@ import type { LiveSignal } from '@/engine/signalEngine';
 import { useLocation } from 'wouter';
 import { StockSearch } from '@/components/StockSearch';
 import type { StockSearchResult } from '@/components/StockSearch';
+import { TradeFlow } from '@/components/TradeWindow';
+import type { TradeSignal } from '@/components/TradeWindow';
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 
@@ -34,7 +36,8 @@ function mapBackendSignal(r: any): LiveSignal {
     id,
     symbol: String(r.symbol ?? '').replace('-EQ', ''),
     stockName: String(r.symbol ?? '').replace('-EQ', ''),
-    exchange: 'NSE',
+    exchange: r.exchange ?? 'NSE',
+    symbolToken: r.symboltoken ?? r.symbolToken ?? '',
     timeframe: '15m',
     timestamp: Date.now(),
     signal: r.signal,
@@ -127,18 +130,24 @@ function ConfidenceRing({ value, size = 32 }: { value: number; size?: number }) 
   );
 }
 
-function ResultCard({ signal, onClick }: { signal: LiveSignal; onClick: () => void }) {
+function ResultCard({ signal, onClick, onTrade }: {
+  signal: LiveSignal;
+  onClick: () => void;
+  onTrade?: () => void;
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      onClick={onClick}
-      className="glass-panel border border-border rounded-2xl p-3 flex items-center gap-3 active:scale-95 transition-transform cursor-pointer"
+      className="glass-panel border border-border rounded-2xl p-3 flex items-center gap-3"
     >
-      <div className="w-9 h-9 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center flex-shrink-0 font-bold text-accent text-sm">
+      <div
+        className="w-9 h-9 rounded-full bg-accent/10 border border-accent/20 flex items-center justify-center flex-shrink-0 font-bold text-accent text-sm cursor-pointer active:scale-90 transition-transform"
+        onClick={onClick}
+      >
         {signal.symbol[0]}
       </div>
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 cursor-pointer" onClick={onClick}>
         <div className="flex items-center gap-2 mb-0.5">
           <span className="font-bold text-sm text-foreground font-mono">{signal.symbol}</span>
           <SignalBadge sig={signal.signal} />
@@ -153,11 +162,16 @@ function ResultCard({ signal, onClick }: { signal: LiveSignal; onClick: () => vo
           </div>
         )}
       </div>
-      <div className="flex flex-col items-center gap-1 flex-shrink-0">
+      <div className="flex flex-col items-center gap-1.5 flex-shrink-0">
         <ConfidenceRing value={signal.confidence} />
-        <span className={`text-[9px] font-bold ${signal.score > 0 ? 'text-primary' : signal.score < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
-          {signal.score > 0 ? '+' : ''}{signal.score}
-        </span>
+        {onTrade && signal.signal !== 'NEUTRAL' && (
+          <button
+            onClick={e => { e.stopPropagation(); onTrade(); }}
+            className="text-[9px] px-2 py-0.5 rounded-full bg-accent text-background font-black active:scale-90 transition-transform"
+          >
+            Trade
+          </button>
+        )}
       </div>
     </motion.div>
   );
@@ -269,7 +283,7 @@ function ScanProgressPanel({
 }
 
 // ─── Custom single-stock scan ─────────────────────────────────────────────────
-function CustomStockScan() {
+function CustomStockScan({ onTrade }: { onTrade: (sig: TradeSignal) => void }) {
   const [, navigate] = useLocation();
   const [selected, setSelected] = useState<StockSearchResult | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -420,17 +434,37 @@ function CustomStockScan() {
 
           {/* Action buttons */}
           <div className="flex gap-2">
+            {sig !== 'NEUTRAL' && (
+              <button
+                onClick={() => onTrade({
+                  symbol: selected?.tradingSymbol ?? '',
+                  symbolToken: selected?.symbolToken ?? '',
+                  exchange: selected?.exchange ?? 'NSE',
+                  companyName: selected?.companyName,
+                  signal: sig,
+                  entry: result.entry ?? 0,
+                  stopLoss: result.stopLoss ?? 0,
+                  target1: result.target1 ?? 0,
+                  target2: result.target2,
+                  confidence: result.confidence ?? 0,
+                  riskReward: result.riskReward,
+                })}
+                className="flex-1 py-3 rounded-xl bg-accent text-background font-black text-sm active:scale-95 transition-all flex items-center justify-center gap-1.5"
+              >
+                <Zap size={14} /> Execute Trade
+              </button>
+            )}
             <button
               onClick={() => navigate(`/charts?symbol=${selected?.tradingSymbol}`)}
-              className="flex-1 py-3 rounded-xl bg-accent text-background font-bold text-sm active:scale-95 transition-all"
+              className="flex-1 py-3 rounded-xl bg-input border border-border text-muted-foreground font-bold text-sm active:scale-95 transition-all"
             >
-              Open Chart
+              Chart
             </button>
             <button
               onClick={() => { setResult(null); }}
               className="px-4 py-3 rounded-xl bg-input border border-border text-muted-foreground font-bold text-sm active:scale-95 transition-all"
             >
-              Reset
+              ↺
             </button>
           </div>
         </motion.div>
@@ -463,6 +497,7 @@ export function ScannerScreen() {
   const [, navigate] = useLocation();
   const [scanMode, setScanMode] = useState<'batch' | 'custom'>('batch');
   const [activeFilter, setActiveFilter] = useState('all');
+  const [tradeSignal, setTradeSignal] = useState<TradeSignal | null>(null);
   const [allResults, setAllResults] = useState<LiveSignal[]>([]);
   const [filteredResults, setFilteredResults] = useState<LiveSignal[]>([]);
   const [scanning, setScanning] = useState(false);
@@ -607,7 +642,7 @@ export function ScannerScreen() {
       </div>
 
       {/* Custom scan mode */}
-      {scanMode === 'custom' && <CustomStockScan />}
+      {scanMode === 'custom' && <CustomStockScan onTrade={setTradeSignal} />}
 
       {/* Batch scan mode — filter chips + scan button + results */}
       {scanMode === 'batch' && <>
@@ -698,7 +733,7 @@ export function ScannerScreen() {
                 </p>
                 <div className="space-y-2">
                   {buys.sort((a, b) => b.score - a.score).map(s => (
-                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
+                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} onTrade={() => setTradeSignal({ symbol: s.symbol, symbolToken: s.symbolToken ?? "", exchange: s.exchange, signal: s.signal, entry: s.currentPrice, stopLoss: s.tradeSetup.stopLoss, target1: s.tradeSetup.target1, target2: s.tradeSetup.target2, confidence: s.confidence, riskReward: s.tradeSetup.riskRewardRatio })} />
                   ))}
                 </div>
               </div>
@@ -711,7 +746,7 @@ export function ScannerScreen() {
                 </p>
                 <div className="space-y-2">
                   {neutral.slice(0, 5).map(s => (
-                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
+                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} onTrade={() => setTradeSignal({ symbol: s.symbol, symbolToken: s.symbolToken ?? "", exchange: s.exchange, signal: s.signal, entry: s.currentPrice, stopLoss: s.tradeSetup.stopLoss, target1: s.tradeSetup.target1, target2: s.tradeSetup.target2, confidence: s.confidence, riskReward: s.tradeSetup.riskRewardRatio })} />
                   ))}
                   {neutral.length > 5 && (
                     <p className="text-xs text-muted-foreground text-center py-2">+{neutral.length - 5} more neutral...</p>
@@ -727,7 +762,7 @@ export function ScannerScreen() {
                 </p>
                 <div className="space-y-2">
                   {sells.sort((a, b) => a.score - b.score).map(s => (
-                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} />
+                    <ResultCard key={s.id} signal={s} onClick={() => navigate(`/charts?symbol=${s.symbol}`)} onTrade={() => setTradeSignal({ symbol: s.symbol, symbolToken: s.symbolToken ?? "", exchange: s.exchange, signal: s.signal, entry: s.currentPrice, stopLoss: s.tradeSetup.stopLoss, target1: s.tradeSetup.target1, target2: s.tradeSetup.target2, confidence: s.confidence, riskReward: s.tradeSetup.riskRewardRatio })} />
                   ))}
                 </div>
               </div>
@@ -761,6 +796,9 @@ export function ScannerScreen() {
         )}
       </AnimatePresence>
       </>}
+
+      {/* Trade execution flow — modal + active trade window */}
+      <TradeFlow signal={tradeSignal} onDismiss={() => setTradeSignal(null)} />
     </div>
   );
 }
