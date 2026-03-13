@@ -2,32 +2,10 @@ import { Router } from "express";
 import { generateSignal } from "../lib/signal-engine.js";
 import { calculateIndicators } from "../lib/indicators.js";
 import { NIFTY50 } from "../lib/constants.js";
-import * as angelone from "../lib/angelone.js";
+import { fetchCandles } from "../lib/candle-fetcher.js";
 import type { Candle } from "../lib/broker-adapter.js";
 
 const router = Router();
-
-async function fetchCandles(token: string, interval = "FIFTEEN_MINUTE", exchange = "NSE"): Promise<Candle[]> {
-  const now = new Date();
-  const from = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-
-  const pad = (n: number) => n.toString().padStart(2, "0");
-  const fmt = (d: Date) =>
-    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-  const raw = await angelone.getCandleData({
-    exchange,
-    symboltoken: token,
-    interval,
-    fromdate: fmt(from),
-    todate: fmt(now),
-  });
-
-  return raw.map(([ts, open, high, low, close, volume]) => ({
-    time: new Date(ts).getTime() / 1000,
-    open, high, low, close, volume,
-  }));
-}
 
 router.post("/generate", async (req, res) => {
   try {

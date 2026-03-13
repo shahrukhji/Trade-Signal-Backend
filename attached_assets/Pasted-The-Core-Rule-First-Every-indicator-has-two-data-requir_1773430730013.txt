@@ -1,0 +1,45 @@
+The Core Rule First
+Every indicator has two data requirements: a minimum (to even produce a value) and a recommended warmup (to produce a reliable value). EMA-based indicators especially need extra history because each EMA value carries a fraction of all prior history — the more data fed in, the more accurate it becomes.
+​
+
+For a 10-day EMA, StockCharts uses at least 250 periods to get accuracy within a fraction of a penny. This principle applies to all EMA-derived indicators.
+​
+
+Data Requirements Per Indicator
+Indicator	Minimum Candles	Recommended Candles	Notes
+SMA 20	20	50	Pure average, no warmup needed
+SMA 50	50	100	Exact same logic
+SMA 200	200	250+	Needs ~1 year of daily data
+EMA 9/21/50	Period + 1	150–250	EMA seeds from SMA, needs warmup 
+​
+EMA 200	200	400+	Most critical — load max history
+RSI (14)	15	100–150	Wilder's smoothing takes long to stabilize
+MACD (12/26/9)	35 (26+9)	150–200	Signal line adds 9 more EMA warmup 
+​
+Bollinger Bands (20)	20	100	STD dev calculation stabilizes with more data
+Stochastic (14,3,3)	20	50–100	%D smoothing adds extra lag
+ATR (14)	14	50–100	Wilder smoothing like RSI
+Supertrend (10,3)	20	50–100	ATR-based; inherits ATR warmup
+ADX (14)	28	150–200	Double smoothing — slowest to stabilize
+VWAP	Current session only	1 day	Resets every day — no prior history needed 
+​
+OBV	20	100+	Cumulative — more history = better divergence context
+CCI (20)	20	50–100	Mean deviation stabilizes quickly
+Williams %R (14)	14	50	Simple range calculation
+MFI (14)	14	100	Volume-weighted RSI — same warmup as RSI
+Parabolic SAR	20	50–100	AF acceleration needs trend context
+Pivot Points	1 previous day's OHLC	1 day	Calculated purely from prior day 
+​
+RSI Divergence	34 (14+20 lookback)	150+	Needs stable RSI plus 20-bar swing lookback
+Volume Analysis (20)	20	50–100	Simple average of volume
+Practical Answer for Your Setup
+3 days of data is NOT enough for daily charts. Here's what you actually need:
+
+Intraday trading (5-min/15-min candles): 3 days ≈ 225–375 candles. This is sufficient for RSI, MACD, Stochastic, ATR, and Bollinger Bands. Still marginal for ADX and EMA200.
+
+Daily chart trading: You need at least 1 year (250 trading days) to cover SMA200/EMA200. For ADX to be reliable, load 2 years (500 days).
+
+For all EMA-based indicators: Most platforms (TradingView, Zerodha Kite) auto-load 1–5 years — just ensure you're not restricting the date range manually.
+
+Golden Rule
+Load the maximum available history your platform allows. The calculation engine will use all of it. More past data = more accurate current indicator values, especially for EMA, MACD, ADX, and RSI. Never manually limit your chart to just 3 days unless you're purely doing intraday VWAP or Pivot Point trades
