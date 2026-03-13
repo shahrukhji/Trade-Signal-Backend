@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { useLocation } from 'wouter';
 import { Search, BrainCircuit, Activity, Plus, TrendingUp, TrendingDown, Sparkles, CheckCircle, XCircle, AlertCircle, ChevronDown, ChevronUp, X, Zap, Shield } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ChartWidget } from '@/components/ChartWidget';
@@ -316,7 +317,25 @@ function CrossVerifyModal({ result, onClose, onExecute }: {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function ChartScreen() {
-  const [symbol, setSymbol] = useState('RELIANCE-EQ');
+  const [location] = useLocation();
+
+  const [symbol, setSymbol] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sym = params.get('symbol');
+    if (!sym) return 'RELIANCE-EQ';
+    return sym.endsWith('-EQ') ? sym : `${sym}-EQ`;
+  });
+
+  // Update symbol whenever the URL query changes (e.g. navigating from scanner
+  // while already on the charts page)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sym = params.get('symbol');
+    if (sym) {
+      setSymbol(sym.endsWith('-EQ') ? sym : `${sym}-EQ`);
+    }
+  }, [location]);
+
   const [timeframe, setTimeframe] = useState('15m');
   const { data, loading, currentPrice, change } = useMarketData(symbol, timeframe);
   const indicators = useIndicators(symbol);
