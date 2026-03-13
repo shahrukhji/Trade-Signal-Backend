@@ -1,8 +1,8 @@
 import { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
 import {
-  Home, BarChart2, Zap, Briefcase, Settings, Activity,
-  ScanLine, Target, User, FlaskConical,
+  Home, BarChart2, Zap, Briefcase, Settings,
+  ScanLine, Target, FlaskConical, Activity,
 } from 'lucide-react';
 import { useStore } from '@/store/use-store';
 
@@ -17,7 +17,6 @@ export function Layout({ children }: { children: ReactNode }) {
     { id: '/strategies', icon: Target,         label: 'Strategy'  },
     { id: '/scanner',    icon: ScanLine,       label: 'Scanner'   },
     { id: '/portfolio',  icon: Briefcase,      label: 'Portfolio' },
-    { id: '/account',    icon: User,           label: 'Account'   },
     { id: '/settings',   icon: Settings,       label: 'Settings'  },
     { id: '/paper',      icon: FlaskConical,   label: 'Paper'     },
   ];
