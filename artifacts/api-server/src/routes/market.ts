@@ -17,30 +17,61 @@ const INDEX_NAME: Record<string, string> = {
 
 router.post("/quote", async (req, res) => {
   try {
-    const { symbols, exchange = "NSE", mode = "FULL" } = req.body as {
-      symbols: string[];
+    const { symbols, symboltokens, exchange = "NSE", mode = "FULL" } = req.body as {
+      symbols?: string[];
+      symboltokens?: string[];   // Pass raw tokens directly (for non-NIFTY50 stocks)
       exchange?: string;
       mode?: string;
     };
 
-    if (!symbols || !Array.isArray(symbols)) {
-      res.status(400).json({ error: "symbols array required" });
-      return;
+    const tokens: string[] = [];
+
+    // 1. Accept raw tokens directly (for any stock)
+    if (Array.isArray(symboltokens) && symboltokens.length > 0) {
+      tokens.push(...symboltokens.slice(0, 50));
     }
 
-    const tokens: string[] = [];
-    for (const sym of symbols.slice(0, 50)) {
-      const stock = NIFTY50.find(s => s.symbol === sym || s.symbol === sym + "-EQ" || s.name === sym);
-      if (stock) tokens.push(stock.token);
+    // 2. Resolve symbol names → tokens via NIFTY50 lookup
+    if (Array.isArray(symbols) && symbols.length > 0) {
+      for (const sym of symbols.slice(0, 50)) {
+        if (/^\d+$/.test(sym)) {
+          tokens.push(sym); // already a numeric token
+        } else {
+          const allStocks = [...NIFTY50, ...MIDCAP_STOCKS, ...SMALLCAP_STOCKS];
+          const stock = allStocks.find(s =>
+            s.symbol === sym ||
+            s.symbol === sym + "-EQ" ||
+            s.symbol.replace("-EQ", "") === sym
+          );
+          if (stock) tokens.push(stock.token);
+        }
+      }
     }
 
     if (tokens.length === 0) {
-      res.status(400).json({ error: "No valid symbols found" });
+      res.status(400).json({ error: "No valid symbols or tokens found" });
       return;
     }
 
-    const data = await angelone.getLiveQuote(mode, { [exchange]: tokens });
-    res.json({ success: true, data });
+    const raw = await angelone.getLiveQuote(mode, { [exchange]: tokens }) as {
+      fetched?: Array<Record<string, string | number>>;
+    };
+
+    // Normalize to flat array so all clients can use data[i].ltp
+    const fetched = Array.isArray(raw?.fetched) ? raw.fetched : [];
+    const normalized = fetched.map(q => ({
+      token: String(q.symbolToken ?? q.token ?? ""),
+      ltp: Number(q.ltp ?? 0),
+      open: Number(q.open ?? 0),
+      high: Number(q.high ?? 0),
+      low: Number(q.low ?? 0),
+      close: Number(q.close ?? 0),
+      change: Number(q.netChange ?? 0),
+      percentChange: Number(q.percentChange ?? 0),
+      volume: Number(q.tradeVolume ?? q.volume ?? 0),
+    }));
+
+    res.json({ success: true, data: normalized, fetched: normalized });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Quote failed";
     res.status(500).json({ error: msg });

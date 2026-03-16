@@ -338,13 +338,18 @@ export function ActiveTradeWindow({ trade, onClose }: ActiveTradeWindowProps) {
   const pollPrice = useCallback(async () => {
     try {
       const sym = trade.symbol.replace('-EQ', '');
+      const body = trade.symbolToken
+        ? { symboltokens: [trade.symbolToken], exchange: trade.exchange || 'NSE' }
+        : { symbols: [sym], exchange: trade.exchange || 'NSE' };
       const res = await fetch(`${BASE}/api/market/quote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: [sym], exchange: trade.exchange }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
-      const ltp = Array.isArray(json.data) && json.data[0]?.ltp ? Number(json.data[0].ltp) : 0;
+      // API now returns normalized flat array at json.data
+      const quotes: Array<{ ltp: number }> = Array.isArray(json.data) ? json.data : [];
+      const ltp = quotes[0]?.ltp ? Number(quotes[0].ltp) : 0;
       if (ltp > 0) {
         setCurrentPrice(ltp);
         // Feed paper engine so SL/target trigger orders work
@@ -357,7 +362,7 @@ export function ActiveTradeWindow({ trade, onClose }: ActiveTradeWindowProps) {
         }
       }
     } catch (_) {}
-  }, [trade.symbol, trade.exchange, trade.mode]);
+  }, [trade.symbol, trade.symbolToken, trade.exchange, trade.mode]);
 
   useEffect(() => {
     fetchCandles();

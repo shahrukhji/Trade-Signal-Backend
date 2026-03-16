@@ -55,9 +55,11 @@ async function fetchLiveQuote(symbol: string): Promise<number | null> {
     });
     if (!res.ok) return null;
     const json = await res.json();
-    const fetched = json.data?.fetched;
-    if (Array.isArray(fetched) && fetched.length > 0 && fetched[0].ltp) {
-      return Number(fetched[0].ltp);
+    // API returns normalized flat array at json.data
+    const quotes: Array<{ ltp: number }> = Array.isArray(json.data) ? json.data
+      : Array.isArray(json.data?.fetched) ? json.data.fetched : [];
+    if (quotes.length > 0 && quotes[0].ltp) {
+      return Number(quotes[0].ltp);
     }
     return null;
   } catch {
